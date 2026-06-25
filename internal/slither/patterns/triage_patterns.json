@@ -1,0 +1,1089 @@
+{
+  "version": 1,
+  "path_terms": [
+    { "term": "auth", "weight": 5 },
+    { "term": "security", "weight": 5 },
+    { "term": "crypto", "weight": 5 },
+    { "term": "permission", "weight": 5 },
+    { "term": "payment", "weight": 5 },
+    { "term": "billing", "weight": 5 },
+    { "term": "tax", "weight": 4 },
+    { "term": "secret", "weight": 5 },
+    { "term": "token", "weight": 4 },
+    { "term": "credential", "weight": 4 },
+    { "term": "codeowners", "weight": 3 },
+    { "term": "migration", "weight": 4 },
+    { "term": "database", "weight": 4 },
+    { "term": "db", "weight": 3 },
+    { "term": "workflow", "weight": 3 },
+    { "term": "agent", "weight": 3 },
+    { "term": "afk", "weight": 3 },
+    { "term": "config", "weight": 3 },
+    { "term": "deploy", "weight": 3 },
+    { "term": "router", "weight": 3 },
+    { "term": "handler", "weight": 3 },
+    { "term": "main.go", "weight": 4 },
+    { "term": "main.ts", "weight": 3 },
+    { "term": "main.js", "weight": 3 },
+    { "term": "main.py", "weight": 3 },
+    { "term": "main.rs", "weight": 3 },
+    { "term": "index.ts", "weight": 3 },
+    { "term": "index.tsx", "weight": 3 },
+    { "term": "index.js", "weight": 3 },
+    { "term": "index.jsx", "weight": 3 },
+    { "term": "index.html", "weight": 3 },
+    { "term": "server.go", "weight": 3 },
+    { "term": "server.ts", "weight": 3 },
+    { "term": "server.js", "weight": 3 },
+    { "term": "app.py", "weight": 3 },
+    { "term": "program.cs", "weight": 3 },
+    { "term": "types.go", "weight": 2 },
+    { "term": "types.ts", "weight": 2 },
+    { "term": "query", "weight": 3 },
+    { "term": "repository", "weight": 3 },
+    { "term": "repo", "weight": 2 },
+    { "term": "proto", "weight": 2 },
+    { "term": "graphql", "weight": 2 },
+    { "term": "openapi", "weight": 2 },
+    { "term": "swagger", "weight": 2 },
+    { "term": "templ", "weight": 2 },
+    { "term": "go.mod", "weight": 4 },
+    { "term": "go.sum", "weight": 3 },
+    { "term": "package.json", "weight": 4 },
+    { "term": "composer.json", "weight": 4 },
+    { "term": "requirements.txt", "weight": 4 },
+    { "term": "pyproject.toml", "weight": 4 },
+    { "term": "repoflow.yaml", "weight": 4 },
+    { "term": "queue", "weight": 3 },
+    { "term": "worker", "weight": 3 },
+    { "term": "upload", "weight": 3 },
+    { "term": "rate-limit", "weight": 3 },
+    { "term": "ratelimit", "weight": 3 },
+    { "term": "consumer", "weight": 3 },
+    { "term": "producer", "weight": 3 },
+    { "term": "event", "weight": 3 },
+    { "term": "pubsub", "weight": 3 },
+    { "term": "stream", "weight": 3 },
+    { "term": "grpc", "weight": 3 },
+    { "term": "websocket", "weight": 3 },
+    { "term": "sse", "weight": 3 },
+    { "term": "webhook", "weight": 3 },
+    { "term": "callback", "weight": 3 },
+    { "term": "proxy", "weight": 3 },
+    { "term": "preview", "weight": 2 },
+    { "term": "plugin", "weight": 3 },
+    { "term": "subagent", "weight": 3 },
+    { "term": "dispatcher", "weight": 3 },
+    { "term": "sdk", "weight": 3 },
+    { "term": "client", "weight": 2 },
+    { "term": "email", "weight": 3 },
+    { "term": "pdf", "weight": 2 },
+    { "term": "vector", "weight": 3 },
+    { "term": "embedding", "weight": 3 },
+    { "term": "llm", "weight": 3 },
+    { "term": "readme", "weight": 2 },
+    { "term": "quickstart", "weight": 2 },
+    { "term": "example", "weight": 2 },
+    { "term": "examples", "weight": 2 },
+    { "term": "changelog", "weight": 2 },
+    { "term": "release", "weight": 2 },
+    { "term": "cache", "weight": 3 },
+    { "term": "env", "weight": 2 },
+    { "term": "manifest", "weight": 2 },
+    { "term": "settings", "weight": 2 },
+    { "term": "feature", "weight": 2 },
+    { "term": "flags", "weight": 2 },
+    { "term": "utils", "weight": 2 },
+    { "term": "helpers", "weight": 2 },
+    { "term": "common", "weight": 2 },
+    { "term": "logger", "weight": 2 },
+    { "term": "telemetry", "weight": 3 },
+    { "term": "debug", "weight": 2 }
+  ],
+  "content_patterns": [
+    {
+      "id": "unsafe_python_deserialization",
+      "pattern": "\\b(?:pickle|cPickle|_pickle|dill|joblib)\\.(?:load|loads)\\s*\\(",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "unsafe_yaml_load",
+      "pattern": "\\byaml\\.load\\s*\\((?:(?!SafeLoader|safe_load|FullLoader).){0,240}\\)",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "php_unserialize_user_input",
+      "pattern": "(?is)\\bunserialize\\s*\\(\\s*(?:\\$_(?:GET|POST|REQUEST|COOKIE)|filter_input\\s*\\(|base64_decode\\s*\\(\\s*\\$_(?:GET|POST|REQUEST|COOKIE))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "java_native_deserialization",
+      "pattern": "\\b(?:new\\s+ObjectInputStream\\s*\\(|\\.readObject\\s*\\(|\\.readUnshared\\s*\\(|implements\\s+Serializable\\b)",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "java_xml_object_deserialization",
+      "pattern": "\\b(?:new\\s+XMLDecoder\\s*\\(|new\\s+XStream\\s*\\(|\\.fromXML\\s*\\()",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "dotnet_unsafe_deserialization",
+      "pattern": "\\b(?:new\\s+(?:BinaryFormatter|NetDataContractSerializer|LosFormatter|ObjectStateFormatter)\\s*\\(|(?:BinaryFormatter|NetDataContractSerializer|LosFormatter|ObjectStateFormatter)\\s*\\.\\s*Deserialize\\s*\\()",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "xxe_java_xml_factory_surface",
+      "pattern": "\\b(?:DocumentBuilderFactory|SAXParserFactory|XMLInputFactory|TransformerFactory|SchemaFactory)\\.newInstance\\s*\\(",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "xxe_java_unsafe_feature_enabled",
+      "pattern": "(?is)\\b(?:setFeature|setProperty)\\s*\\([^;\\n]{0,220}(?:external-general-entities|external-parameter-entities|load-external-dtd|ACCESS_EXTERNAL_DTD|ACCESS_EXTERNAL_SCHEMA|SUPPORT_DTD|isSupportingExternalEntities)[^;\\n]{0,80}\\b(?:true|all|file|http)\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "xxe_python_lxml_unsafe_options",
+      "pattern": "(?is)\\b(?:etree\\.)?XMLParser\\s*\\([^)]*\\b(?:resolve_entities\\s*=\\s*True|load_dtd\\s*=\\s*True|no_network\\s*=\\s*False|huge_tree\\s*=\\s*True)",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "xxe_php_libxml_entity_expansion",
+      "pattern": "(?is)\\b(?:simplexml_load_string|simplexml_load_file|DOMDocument\\s*::\\s*loadXML|->\\s*loadXML|->\\s*load)\\s*\\([^;\\n]{0,220}\\b(?:LIBXML_NOENT|LIBXML_DTDLOAD|LIBXML_DTDATTR)\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "xxe_dotnet_dtd_or_resolver_enabled",
+      "pattern": "\\b(?:DtdProcessing\\s*=\\s*DtdProcessing\\.Parse|XmlResolver\\s*=\\s*new\\s+XmlUrlResolver\\s*\\()",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "xxe_c_libxml_entity_expansion",
+      "pattern": "(?is)\\b(?:xmlCtxtReadDoc|xmlCtxtReadFd|xmlCtxtReadFile|xmlCtxtReadIO|xmlCtxtReadMemory|xmlReadDoc|xmlReadFd|xmlReadFile|xmlReadIO|xmlReadMemory|xmlCtxtUseOptions)\\s*\\([^;\\n]{0,260}\\b(?:XML_PARSE_NOENT|XML_PARSE_DTDLOAD|XML_PARSE_DTDATTR)\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "prototype_pollution_key_literal",
+      "pattern": "[\"'](?:__proto__|constructor\\.prototype|prototype\\.constructor)[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "prototype_pollution_request_merge",
+      "pattern": "(?is)\\b(?:Object\\.assign|\\$\\.extend|jQuery\\.extend|lodash\\.merge|_\\.merge|merge|deepmerge)\\s*\\([^;\\n]{0,260}\\b(?:req\\.(?:query|body|params)|request\\.(?:query|body|params)|ctx\\.(?:query|request\\.body)|event\\.(?:queryStringParameters|body))\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "prototype_pollution_path_setter",
+      "pattern": "(?is)\\b(?:set|setWith|objectPath\\.set|dotProp\\.set|lodash\\.set|_\\.set)\\s*\\([^;\\n]{0,220}\\b(?:req\\.(?:query|body|params)|request\\.(?:query|body|params)|ctx\\.(?:query|request\\.body)|event\\.(?:queryStringParameters|body))\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "process_exit",
+      "pattern": "\\b(os\\.Exit|process\\.exit|System\\.exit)\\s*\\(",
+      "weight": 2,
+      "max_matches": 3
+    },
+    {
+      "id": "shell_boundary",
+      "pattern": "\\b(exec\\.Command|subprocess\\.run|child_process\\.|shell_exec|passthru|system\\s*\\()",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "node_spawn_status_without_error_guard",
+      "pattern": "(?s)\\b(?:const|let|var)\\s+(\\w+)\\s*=\\s*spawnSync\\s*\\([^;\\n]*(?:(?!\\b\\1\\.error\\b).){0,800}\\b\\1\\.status\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "dynamic_eval",
+      "pattern": "\\b(eval|Function)\\s*\\(",
+      "weight": 3,
+      "max_matches": 3
+    },
+    {
+      "id": "browser_injection",
+      "pattern": "\\b(innerHTML|dangerouslySetInnerHTML)\\b",
+      "weight": 3,
+      "max_matches": 3
+    },
+    {
+      "id": "open_redirect_request_target",
+      "pattern": "(?is)\\b(?:res\\.redirect|res\\.location|redirect|RedirectResponse|NextResponse\\.redirect|response\\.sendRedirect|Response\\.Redirect|redirect_to|header\\s*\\(\\s*[\"']Location:)\\s*\\([^;\\n]{0,240}\\b(?:req(?:uest)?\\.(?:query|body|params)|request\\.(?:args|form|GET|POST|query_params|nextUrl\\.searchParams)|params\\s*\\[:(?:url|next|redirect|return_to|returnUrl)\\]|searchParams\\.get\\s*\\(\\s*[\"'](?:url|next|redirect|return|returnTo|return_to|continue|to)[\"']|getParameter\\s*\\(\\s*[\"'](?:url|next|redirect|return|returnTo|return_to|continue|to)[\"'])",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "open_forward_request_target",
+      "pattern": "(?is)\\b(?:getRequestDispatcher|forward)\\s*\\([^;\\n]{0,200}\\b(?:request\\.getParameter\\s*\\(\\s*[\"'](?:fwd|forward|url|next|redirect)[\"']|req(?:uest)?\\.(?:query|body|params)|request\\.(?:args|form|GET|POST|query_params))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "csrf_framework_disabled_or_exempt",
+      "pattern": "(?is)(?:@c[s]rf_exempt\\b|\\bc[s]rf\\s*\\([^)]*\\)\\s*\\.\\s*disable\\s*\\(|\\bc[s]rf\\s*:\\s*false\\b|\\bc[s]rfProtection\\s*:\\s*false\\b|\\bignoreC[S]RF\\b|\\bC[S]RF_COOKIE_SECURE\\s*=\\s*False\\b)",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "csrf_token_in_url",
+      "pattern": "(?i)(?:[?&](?:c[s]rf|x[s]rf|c[s]rf[_-]?token|authenticity_token)=|URLSearchParams\\s*\\([^\\n;]{0,180}(?:c[s]rf|x[s]rf|authenticity_token))",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "csrf_credentialed_state_change_client",
+      "pattern": "(?is)(?:\\bfetch\\s*\\([^;\\n]{0,420}\\bmethod\\s*:\\s*[\"'](?:POST|PUT|PATCH|DELETE)[\"'][^;\\n]{0,420}\\bcredentials\\s*:\\s*[\"']include[\"']|\\baxios\\.(?:post|put|patch|delete|request)\\s*\\([^;\\n]{0,420}\\bwithCredentials\\s*:\\s*true)",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "csrf_broad_allowed_origins",
+      "pattern": "\\ballowedOrigins\\s*:\\s*\\[[^\\]]*[\"']\\*[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "idor_request_param_object_lookup",
+      "pattern": "(?is)\\b(?:findById|findUnique|findFirst|findOne|get_object_or_404|objects\\.get|Model\\.find|Project\\.find|User\\.find)\\s*\\([^;\\n]{0,260}\\b(?:req(?:uest)?\\.(?:params|query|body)\\.(?:id|userId|user_id|accountId|account_id|projectId|project_id|documentId|document_id)|params\\.(?:id|userId|user_id|accountId|account_id|projectId|project_id|documentId|document_id)|searchParams\\.get\\s*\\(\\s*[\"'](?:id|userId|accountId|projectId|documentId)[\"']|request\\.(?:args|form|json|query_params)\\s*\\[\\s*[\"'](?:id|user_id|account_id|project_id|document_id)[\"'])",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "idor_sql_request_id_lookup",
+      "pattern": "(?is)\\b(?:SELECT|UPDATE|DELETE)\\b[^;\\n]{0,260}\\bWHERE\\s+(?:\\w+\\.)?(?:id|user_id|account_id|project_id|document_id)\\s*=\\s*[^;\\n]{0,180}\\b(?:req(?:uest)?\\.(?:params|query|body)|params\\.|request\\.(?:args|form|json|query_params))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "idor_hidden_object_id_field",
+      "pattern": "(?is)<input\\b[^>]{0,260}\\btype\\s*=\\s*[\"']hidden[\"'][^>]{0,260}\\bname\\s*=\\s*[\"'](?:user_id|account_id|project_id|document_id|owner_id|tenant_id)[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "idor_graphql_id_variable_mutation",
+      "pattern": "(?is)\\bmutation\\b[^;\\n]{0,420}\\$\\w*(?:Id|ID|Key|Keys)\\s*:\\s*(?:\\[\\s*)?ID!?|\\bvariables\\s*[:=]\\s*\\{[^}\\n]{0,360}\\b(?:userId|accountId|projectId|documentId|reportKeys)\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "mass_assignment_request_body_write",
+      "pattern": "(?is)\\b(?:new\\s+[A-Z]\\w*|[A-Z]\\w*\\.(?:create|update|findByIdAndUpdate|updateOne)|\\w+\\.(?:create|update|upsert)|Object\\.assign)\\s*\\([^;\\n]{0,320}\\b(?:r[e]q\\.body|request\\.(?:json|data)|request\\.get_json\\s*\\(|request\\.data|await\\s+request\\.json\\s*\\(\\s*\\))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "mass_assignment_request_body_spread_or_set",
+      "pattern": "(?is)\\b(?:create|update|findByIdAndUpdate|updateOne|updateMany)\\s*\\([^;\\n]{0,320}(?:\\.\\.\\.\\s*r[e]q\\.body|data\\s*:\\s*r[e]q\\.body|\\$set\\s*:\\s*r[e]q\\.body|body\\s*:\\s*await\\s+request\\.json\\s*\\(\\s*\\))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "mass_assignment_python_request_dict_expand",
+      "pattern": "(?is)\\b(?:payload|data|body)\\s*=\\s*(?:await\\s+request\\.json\\s*\\(\\s*\\)|request\\.get_json\\s*\\(\\s*\\)|request\\.data)[^;]{0,700}\\b(?:[A-Z]\\w+\\s*\\(\\s*\\*\\*\\s*(?:payload|data|body)|\\w+\\.(?:update|create)\\s*\\(\\s*\\*\\*\\s*(?:payload|data|body))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "mass_assignment_django_all_fields",
+      "pattern": "(?is)\\bclass\\s+\\w+Form\\b[^;]{0,900}\\bfields\\s*=\\s*[\"']__all__[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "mass_assignment_laravel_unguarded",
+      "pattern": "protected\\s+\\$guarded\\s*=\\s*(?:array\\s*\\(\\s*\\)|\\[\\s*\\])",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "nosql_request_object_query",
+      "pattern": "(?is)\\b(?:find|findOne|findByIdAndUpdate|updateOne|updateMany|deleteOne|deleteMany|aggregate)\\s*\\([^;\\n]{0,180}\\b(?:req(?:uest)?\\.(?:query|body|params)|ctx\\.(?:query|request\\.body)|request\\.(?:args|form|json|query_params))\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "nosql_request_spread_or_merge",
+      "pattern": "(?is)\\b(?:find|findOne|aggregate|updateOne|updateMany)\\s*\\([^;\\n]{0,220}(?:\\.\\.\\.\\s*(?:req(?:uest)?\\.(?:query|body|params)|ctx\\.(?:query|request\\.body))|Object\\.assign\\s*\\([^;\\n]{0,120}\\b(?:req(?:uest)?\\.(?:query|body|params)|ctx\\.(?:query|request\\.body)))",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "nosql_operator_or_eval_surface",
+      "pattern": "(?:[\"']\\$(?:where|regex|expr|ne|gt|gte|lt|lte|nin|or|and)[\"']|\\b(?:db\\.eval|\\$where)\\b)",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "ssrf_user_controlled_url_fetch",
+      "pattern": "(?is)\\b(?:fetch|axios\\.(?:get|post|request)|got|request|http\\.Get|http\\.Post|requests\\.(?:get|post|request)|httpx\\.(?:get|post|request)|urllib\\.request\\.urlopen|aiohttp\\.)\\s*\\([^;\\n]{0,220}\\b(?:req(?:uest)?\\.(?:query|params|body|url|form|args)|r\\.URL\\.Query\\(\\)\\.Get|request\\.(?:args|form|json|query_params)|params\\s*\\[[\"']url[\"']|body\\s*\\[[\"']url[\"'])",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "ssrf_cloud_metadata_endpoint",
+      "pattern": "(?:https?://(?:169\\.254\\.169\\.254|169\\.254\\.170\\.2|100\\.100\\.100\\.200|metadata\\.google\\.internal|\\[?fd00:ec2::254\\]?)[^\"'\\s]*|[\"'](?:169\\.254\\.169\\.254|169\\.254\\.170\\.2|100\\.100\\.100\\.200|metadata\\.google\\.internal|fd00:ec2::254|IMDSv?2?)[\"'])",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "ssrf_non_http_scheme",
+      "pattern": "\\b(?:file|gopher|dict|data|ftp|smb|smtp)://",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "hardcoded_private_key",
+      "pattern": "-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----",
+      "weight": 5,
+      "max_matches": 3
+    },
+    {
+      "id": "provider_token_literal",
+      "pattern": "\\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}\\b|\\bgithub_pat_[A-Za-z0-9_]{20,}_[A-Za-z0-9_]{20,}\\b|\\bsk-[A-Za-z0-9]{20,}\\b|\\bxox[baprs]-[A-Za-z0-9-]{20,}\\b|\\bAKIA[0-9A-Z]{16}\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "credential_assignment_literal",
+      "pattern": "(?i)\\b(?:api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\\b\\s*[:=]\\s*[\"'][^\"'\\n]{16,}[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "entrypoint_exit",
+      "pattern": "\\b(panic|throw|fatal|Fatalf|log\\.Fatal)\\s*\\(",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "not_implemented_stub",
+      "pattern": "\\b(panic|throw)\\s*\\(\\s*[\"']not implemented[\"']\\s*\\)",
+      "weight": 4,
+      "max_matches": 4
+    },
+    {
+      "id": "lint_suppression",
+      "pattern": "\\b(nolint|eslint-disable|phpstan-ignore|type:\\s*ignore)\\b",
+      "weight": 1,
+      "max_matches": 5
+    },
+    {
+      "id": "background_context",
+      "pattern": "\\bcontext\\.Background\\s*\\(\\s*\\)",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "async_or_concurrent_boundary",
+      "pattern": "\\b(go\\s+func|Promise\\.all|Thread\\s*\\(|asyncio\\.|queueMicrotask|setTimeout)\\b",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "looped_io_or_query",
+      "pattern": "(?s)\\b(for|while)\\b.{0,400}\\b(Query|Exec|fetch|axios\\.|http\\.|findMany|findUnique|SELECT|INSERT|UPDATE|DELETE)\\b",
+      "weight": 3,
+      "max_matches": 3
+    },
+    {
+      "id": "sql_string_assembly",
+      "pattern": "(?is)\\b(fmt\\.Sprintf|sprintf|\\.format|\\+\\s*[\"'`]|[\"'`]\\s*\\+)\\b.{0,200}\\b(SELECT|INSERT|UPDATE|DELETE|CREATE\\s+INDEX|ALTER\\s+TABLE)\\b",
+      "weight": 4,
+      "max_matches": 4
+    },
+    {
+      "id": "offset_pagination",
+      "pattern": "(?i)\\bOFFSET\\s+\\d+\\b|\\.offset\\s*\\(",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "unsafe_index_creation",
+      "pattern": "(?i)\\bCREATE\\s+INDEX\\s+(?!CONCURRENTLY\\b)",
+      "weight": 3,
+      "max_matches": 4
+    },
+    {
+      "id": "resource_lifecycle",
+      "pattern": "\\b(Open|Listen|Connect|NewTicker|NewTimer|setInterval)\\s*\\(",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "generator_boundary",
+      "pattern": "\\b(go:generate|templ generate|sqlc generate|protoc|oapi-codegen|swagger generate|graphql-codegen)\\b",
+      "weight": 2,
+      "max_matches": 3
+    },
+    {
+      "id": "go_module_replace",
+      "pattern": "(?m)^\\s*replace\\s+\\S+\\s+=>\\s+",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "os_specific_command",
+      "pattern": "\\b(pbcopy|xclip|xsel|powershell|osascript)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "unbounded_find_command",
+      "pattern": "\\bfind\\s+(?:\\.|/|\\$\\w+)\\b(?![^\\n;]{0,120}\\s-(?:maxdepth|depth)\\b)",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "manual_file_move_command",
+      "pattern": "\\bmv\\s+[^\\n;]+\\s+[^\\n;]+",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "afk_add_without_cwd",
+      "pattern": "\\bafk\\s+add\\b(?![^\\n;]{0,180}\\s--cwd\\b)",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "stale_afk_cli_verb",
+      "pattern": "\\bafk\\s+(?:rm|show|explain)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "afk_low_impact_task_body",
+      "pattern": "\\(value:\\s*(?:bug-fix|duplication|test-gap|security|bounded-improvement|missing-functionality)\\s+[—-]\\s+impact:\\s+Low\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "go_deprecated_io",
+      "pattern": "\\bio/ioutil\\b|\\bioutil\\.",
+      "weight": 1,
+      "max_matches": 5
+    },
+    {
+      "id": "api_contract_boundary",
+      "pattern": "\\b(OpenAPI|Swagger|protobuf|proto3|GraphQLSchema|graphql\\s*`|service\\s+\\w+\\s*\\{)\\b",
+      "weight": 2,
+      "max_matches": 4
+    },
+    {
+      "id": "graphql_server_surface",
+      "pattern": "\\b(?:new\\s+ApolloServer\\s*\\(|graphqlHTTP\\s*\\(|createYoga\\s*\\(|GraphQLModule\\.(?:forRoot|forRootAsync)\\s*\\(|GraphQLServer\\s*\\(|buildSchema\\s*\\(|makeExecutableSchema\\s*\\()",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "graphql_schema_tooling_enabled",
+      "pattern": "\\b(?:graphiql|playground|introspection)\\s*:\\s*true\\b",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "graphql_batching_enabled",
+      "pattern": "\\b(?:allowBatchedHttpRequests|allowBatchedRequests|batching|batched)\\s*:\\s*true\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "graphql_node_id_access_field",
+      "pattern": "(?im)^\\s*(?:node|nodes)\\s*\\([^\\n)]*\\b(?:id|ids)\\s*:\\s*\\[?\\s*ID\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "websocket_endpoint_surface",
+      "pattern": "\\b(?:new\\s+WebSocket\\.Server\\s*\\(|new\\s+Server\\s*\\([^\\n;]{0,80}\\bws\\b|socket\\.io|@app\\.websocket\\s*\\(|websocket_endpoint\\s*\\(|websockets\\.serve\\s*\\(|websocket\\.Accept\\s*\\(|websocket\\.Upgrader\\s*\\{)",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "websocket_insecure_ws_url",
+      "pattern": "\\bw[s]://(?!localhost\\b|127\\.0\\.0\\.1\\b|\\[?::1\\]?)",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "websocket_allow_all_origin",
+      "pattern": "(?is)\\b(?:CheckOrigin\\s*:\\s*func|verifyClient\\s*:\\s*\\(?\\s*(?:async\\s*)?function|verifyClient\\s*:\\s*\\([^\\)]*\\)\\s*=>|verifyClient\\s*:\\s*\\w+\\s*=>)[^;\\n]{0,360}\\breturn\\s+true\\b|\\bcors\\s*:\\s*\\{[^}\\n]{0,180}\\borigin\\s*:\\s*[\"']\\*[\"']",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "websocket_compression_enabled",
+      "pattern": "\\b(?:perMessageDeflate|permessage-deflate)\\s*:\\s*true\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "async_messaging_boundary",
+      "pattern": "\\b(Kafka|RabbitMQ|PubSub|pubsub|SQS|SNS|Redis Streams|NATS|Queue|Topic|Consumer|Producer|Subscribe|Publish)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "reliability_policy_boundary",
+      "pattern": "\\b(retry|backoff|timeout|deadline|idempotent|idempotency|dedupe|dead.?letter|DLQ|circuit.?breaker)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "production_resilience_surface",
+      "pattern": "\\b(graceful\\s+shutdown|health\\s+checks?|connection\\s+pool(?:ing)?|backpressure|rate\\s+limiting)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "event_sourcing_boundary",
+      "pattern": "\\b(event sourcing|EventSourcing|CQRS|replay events|event version|event store)\\b",
+      "weight": 3,
+      "max_matches": 4
+    },
+    {
+      "id": "agent_dispatch_boundary",
+      "pattern": "\\b(Task|Agent)\\s*\\(\\s*(subagent_type\\s*=|dc:|[\"'][A-Za-z0-9_-]+-agent[\"'])",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "stale_dispatch_name_symptom",
+      "pattern": "\\b(Task is not available|cannot invoke from this context|Task-dispatchable agent|tool named Task)\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "plugin_agent_boundary",
+      "pattern": "\\b(plugins/cache|plugin agent|permissionMode|fetch-agent|knowledge-agent|planner-agent)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "pi_framework_bypass_import",
+      "pattern": "from\\s+[\"']@earendil-works\\/(?:pi-coding-agent|pi-ai|pi-tui)[\"']|import\\s+[\"']@earendil-works\\/(?:pi-coding-agent|pi-ai|pi-tui)[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "pi_recursive_spawn_surface",
+      "pattern": "\\b(?:spawn|spawnSync|execFile)\\s*\\(\\s*[\"']pi[\"']",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "pi_tool_result_followup_contract",
+      "pattern": "(?s)\\bpi\\.on\\s*\\(\\s*[\"']tool_result[\"'].{0,700}\\bpi\\.(?:sendUserMessage|sendMessage)\\s*\\((?:(?!deliverAs\\s*:\\s*[\"']followUp[\"']).){0,300}\\)",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "pi_render_callback_contract",
+      "pattern": "\\b(?:renderResult|renderCall|registerMessageRenderer)\\b|\\bnew\\s+Text\\s*\\(",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "pi_event_wait_or_editor_pollution",
+      "pattern": "\\bwaitForIdle\\s*\\(|\\bsetEditorText\\?\\.\\s*\\(",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "workflow_argument_fallback_surface",
+      "pattern": "\\bglobalThis\\.(?:workflowInput|input|request|args|ARGUMENTS)\\b|\\btypeof\\s+args\\s*!==\\s*[\"']undefined[\"']",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "workflow_missing_target_guard",
+      "pattern": "\\b(?:target path not supplied|no target supplied|target does not exist|inventory\\.exists\\s*===\\s*false)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "agent_fanout_failure_accounting",
+      "pattern": "\\b(dropped\\s+\\$?\\{?[^\\n]{0,80}empty\\/failed agent result|keepCounted\\s*\\(|partial fan-out|failed agent result)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "prompt_truncation_observability",
+      "pattern": "\\b(truncated\\s+\\$?\\{?[^\\n]{0,80}chars|capForPrompt\\s*\\(|context is observable|silently lossy)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "bounded_workflow_fanout_cap",
+      "pattern": "\\b(LANE_CAP|VERIFY_CAP|VERIFY_LOW_CAP|LOW_SEV_CAP|MAX_ROUNDS|verify cap|lane cap)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "adversarial_verification_gate",
+      "pattern": "\\b(adversarial(?:ly)?\\s+(?:verify|verification|refute|refutation)|refutePanel\\s*\\(|refuted\\s*:\\s*\\{\\s*type:\\s*[\"']boolean[\"'])\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "evidence_grounding_gate",
+      "pattern": "\\b(evidenceGrounded\\s*\\(|grounding\\s+FAIL|path not found|line\\s+\\$?\\{?[^\\n]{0,80}out of range|cited path\\/line)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "changed_scope_quality_gate",
+      "pattern": "\\b(dcp\\s+scope\\s+--changed|changedFiles|affected\\s+packages|minimal\\s+(?:test|lint)\\s+command|scope\\.testCmd|scope\\.lintCmd)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "git_preflight_context_injection",
+      "pattern": "\\b(GIT PREFLIGHT|gatherPreflight|pain commits|High-churn files|Dirty \\(uncommitted\\) files|test files found near targets)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "source_context_allowlist_boundary",
+      "pattern": "\\b(allowedBasePaths|isAllowedPath|isWithinBase|path outside allowed directory|access denied: path outside allowed directory)\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "model_generated_diff_no_apply_contract",
+      "pattern": "\\b(apply-ready code diffs|unified diff block|No commentary\\s+[—-]\\s+only diffs|does NOT auto-apply|does not apply these diffs|SKIP:\\s*<reason>)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "workflow_mode_validation_gate",
+      "pattern": "\\b(KNOWN_MODES|unknown\\s+mode|expected\\s+test\\|lint\\|profile\\|optimize|mode\\s+router:\\s+test\\s*\\|\\s*lint\\s*\\|\\s*profile\\s*\\|\\s*optimize)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "exact_measurement_command_reuse",
+      "pattern": "\\b(exact\\s+shell\\s+command|Run this EXACT benchmark command verbatim|Do not re-infer or substitute|command\\s+field|best\\.command)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "direction_aware_optimization_gate",
+      "pattern": "\\b(higherIsBetter|HIGHER_IS_BETTER|direction-aware\\s+improvement|remeasure\\.value\\s*[<>]\\s*best\\.value|no gain\\s+[—-]\\s+stopping)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "optimize_round_cap_or_convergence",
+      "pattern": "\\b(MAX_OPTIMIZE_ROUNDS|maxRounds|hit round cap|converged after|cappedAt|gains still available)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "baseline_final_gate_pair",
+      "pattern": "\\b(baseline-tests|final-tests|final verification gate|baseline test result|Re-run the scoped test command)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "fix_repro_gate_surface",
+      "pattern": "\\b(fix_gate\\.sh\\s+(?:baseline|verify)|fail[-→>]pass|--repro\\s+['\"]|--symptom\\s+['\"]|regression\\s+baseline\\s+captured)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "leftover_debug_instrumentation",
+      "pattern": "\\[DEBUG-[A-Za-z0-9_-]+\\]",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "speculative_fix_retry_guard",
+      "pattern": "\\b(Do not stack speculative fixes|three failed fix attempts|confirmed hypothesis|eliminated hypotheses|surviving suspects)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "git_history_mining_surface",
+      "pattern": "\\bgit\\s+(?:-C\\s+\\S+\\s+)?(?:log|show)\\b.{0,180}\\b(--first-parent|--since=|-S\\s*['\"]|--grep=|--name-only|--format=|--stat)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "unbounded_git_diff_ingestion",
+      "pattern": "\\bgit\\s+(?:-C\\s+\\S+\\s+)?(?:log\\s+-p|show)\\b(?![^\\n;]{0,180}\\b(--stat|--name-only|--name-status|head\\s+-|sed\\s+-n|wc\\s+-l)\\b)",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "untrusted_commit_data_guard",
+      "pattern": "\\b(commit messages? and diffs are untrusted data|commit message is a hypothesis|embedded directive|ignore previous|treat all log content as data)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "audit_report_quality_cap",
+      "pattern": "\\b(coverage-block-present|residual-risk-present|severity-tally-present|per-finding-fields|verification-commands|self-critique-present|lane-coverage-statuses|cap-high-lane-partial|cap-detector-not-triaged|cap-missing-coverage-block|cap-missing-residual-risk)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "audit_correctness_drift_metric",
+      "pattern": "\\b(ground-truth\\.md|expected_false_positives|recall|precision|F1|f1|JACCARD_THRESHOLD|DRIFT WARNING|SCORE_DELTA_THRESHOLD|F1_DELTA_THRESHOLD)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "cve_corrob_scan_surface",
+      "pattern": "\\b(osv-scanner|cve_scan|CVE corroborated by osv-scanner|ecosystems_scanned|ecosystems_skipped|scan_errors|advisory_url|fixed_version|osv_id)\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "offline_scanner_degradation",
+      "pattern": "\\b(available:\\s*false|scanner not found|offline DB not available|no live API|--local-db|osv\\.dev\\/v1)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "deletion_budget_metric",
+      "pattern": "\\b(linesDeletable|Deletion budget|net\\s+~-\\d+|whole-construct removals|line-golfing|surfacedFindings|deletion-oriented lanes)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "deterministic_audit_prepass_queue",
+      "pattern": "\\b(first_read_queue|selected_lanes|workflow_files|static_commands|local_first_contract|repomap\\s+(?:hygiene|risks|surface|effects)|history hotspot and bug-fix overlap)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "bounded_repo_orientation_probe",
+      "pattern": "\\b(repo_overview|Repository Brief|repomap brief \\.|Startup Context Signal Triage|evidence rows|truncation metadata|suggestedNext|filesScanned|maxEvidence|maxFiles)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "workspace_root_escape_guard",
+      "pattern": "\\b(root must be inside the active workspace|isInsideWorkspace|resolveRoot|symlink escapes|realpath\\(|path outside allowed directory)\\b",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "deterministic_tool_availability_followup",
+      "pattern": "\\b(toolAvailability|Cmd\\.which|suggestedCommand|Run repomap -f compact|Run repoflow scan [^\\n]+ -o -|Available for read-only Go execution-flow prepass)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "audit_runtime_docs_drift_detector",
+      "pattern": "\\b(runtime-installed-binary-drift|docs_cli_command_drift|docs_source_literal_drift|docs_path_variant_drift|matches_head|binary_revision|scopedFiles|baselineDiff)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "audit_external_detector_gap",
+      "pattern": "\\b(externalOnly|external-only|suggestedDetectorLeads|encode it as a deterministic detector|external deep-audit report)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "scorecard_stale_rule_guard",
+      "pattern": "\\b(stalePenaltyWarnings|penaltyRules|collectActiveRuleIds|has no matching active rule)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "skill_frontmatter_audit_surface",
+      "pattern": "\\b(frontmatter\\s+(?:validity|description)|description:\\s*frontmatter|name,\\s*description\\s+present|well-formed\\s+frontmatter)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "skill_trigger_quality_surface",
+      "pattern": "\\b(trigger\\s+quality|description\\s+discoverable|right\\s+skill\\s+fires|vague,\\s*overlapping,\\s*or\\s*missing\\s+trigger|trigger\\s+rewrites?)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "skill_overlap_consolidation_surface",
+      "pattern": "\\b(plugin-shadow|partial-overlap|merge-candidate|cross-skill\\s+redundancy|consolidation\\s+recommendation)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "skill_structure_extraction_surface",
+      "pattern": "\\b(thin->fat|references\\/\\s+extraction|cclint-style\\s+conformance|too\\s+long\\s+and\\s+should\\s+extract|too\\s+thin\\s+to\\s+be\\s+useful)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "instruction_artifact_preflight_surface",
+      "pattern": "\\b(SIZE_GATE_MAX_LINES|FRONTMATTER|FM_DESCRIPTION|SHIPPING_SCOPE|COMPANIONS|CCLINT|PRIOR_FIXES)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "instruction_tool_grant_or_companion_drift",
+      "pattern": "\\b(Tool-grant cross-check|allowed-tools|Referenced-component claims|Companion drift|companion-drift|referenced component|contradicting line)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "plugin_local_dependency_drift",
+      "pattern": "\\b(plugin-distributed|marketplace\\/cache|hard-code user-local deps|user-local deps|plugin-shipped resource|~\\/\\.claude paths?)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "prompt_contract_closure_gate",
+      "pattern": "\\b(Diagnosis\\s+.*Improved Artifact\\s+.*Why This Works\\s+.*Residual Risks|Closure rule|orphan risks|every failure mode named)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "empty_discovery_guard",
+      "pattern": "\\b(no\\s+SKILL\\.md\\s+files\\s+found|skills\\.length\\s*===\\s*0|no\\s+.+files\\s+found\\s+under)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "cross_lens_dedup_observability",
+      "pattern": "\\b(Cross-lens\\s+dedup|dedupe-key\\s+truncated|duplicate\\s+finding\\(s\\)|totalDupsRemoved)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "per_run_model_loading",
+      "pattern": "\\b(download.*model|from_pretrained|AutoModel|AutoTokenizer|load_model|loadModel|loadSystemPrompt|LoadConfig)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "embedding_without_persistence",
+      "pattern": "\\b(CLIP|embedding|embeddings|vector|cosine similarity|cosine_similarity)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "language_bridge_overhead",
+      "pattern": "\\b(python\\s+worker|node\\s+worker|exec\\.Command\\(\\s*[\"']python[0-9]*[\"']|subprocess\\.run\\(\\s*\\[\\s*[\"'](go|node|python[0-9]*)[\"'])",
+      "weight": 3,
+      "max_matches": 4
+    },
+    {
+      "id": "blocking_inline_worker",
+      "pattern": "\\b(caption|classify|encode|infer|transcribe|embed)\\w*\\s*\\([^\\n;]*\\)",
+      "weight": 1,
+      "max_matches": 5
+    },
+    {
+      "id": "scale_cliff_marker",
+      "pattern": "\\b(O\\(n\\^?2\\)|quadratic|unbounded\\s+(?:memory|queue|buffer|growth)|load\\s+all\\s+(?:rows|records|files)|deep\\s+call\\s+tree)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "hidden_assumption_marker",
+      "pattern": "\\b(magic\\s+(?:string|value|number)|deployment\\s+assumption|implicit(?:ly)?\\s+called|undocumented\\s+(?:knowledge|entry\\s+point)|dev\\s+heads?)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "drift_hazard_comment",
+      "pattern": "(?i)\\b(in sync|must\\s+(?:match|agree)|keep\\s+[^\\n]{0,80}\\s+aligned|same order|stays consistent|parallel to|update both|mirror(?:s|ed)?)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "go_bool_mode_flag_param",
+      "pattern": "(?m)^func\\s+\\w+\\s*\\([^\\n)]*\\bbool\\b[^\\n)]*\\)",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "single_item_slice_to_aggregate",
+      "pattern": "\\[\\]\\w+(?:\\[[^\\]]+\\])?\\s*\\{\\s*[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?\\s*\\}",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "json_encoder_envelope",
+      "pattern": "json\\.NewEncoder\\s*\\([^\\n;]+\\)(?:(?!\\bEncode\\s*\\().){0,240}\\bEncode\\s*\\(",
+      "weight": 1,
+      "max_matches": 5
+    },
+    {
+      "id": "rows_scan_collection_loop",
+      "pattern": "(?s)\\bfor\\s+\\w+\\.Next\\s*\\(\\s*\\)\\s*\\{.{0,600}\\bScan\\s*\\(",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "boolean_blindness_state_shape",
+      "pattern": "(?s)\\b(?:type\\s+\\w+\\s+struct|interface\\s+\\w+)\\s*\\{(?:(?:(?!\\}).)*\\b(?:is|has|can|should|allow|enable)[A-Za-z0-9_]*\\??\\s*:?[\\s\\t]*(?:bool|boolean)\\b){3}",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "primitive_obsession_params",
+      "pattern": "\\b(?:func\\s+\\w+|function\\s+\\w+)\\s*\\([^)]*(?:(?:\\b\\w+\\s+string\\b|\\b\\w+\\s*:\\s*string\\b)[^)]*){3}",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "test_induced_design_surface",
+      "pattern": "\\b\\w+ForTesting\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "error_context_dropped",
+      "pattern": "\\bfmt\\.Errorf\\s*\\([^\\n)]*%[vs][^\\n)]*\\berr\\b|catch\\s*\\([^)]*\\)\\s*\\{(?:(?!cause\\s*:).){0,400}\\bthrow\\s+new\\s+Error\\s*\\(",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "read_all_or_global_growth",
+      "pattern": "\\bio\\.ReadAll\\s*\\(|\\b(?:const|let|var)\\s+\\w+\\s*=\\s*new\\s+Map\\s*<|\\bvar\\s+\\w+\\s+map\\[",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "ancient_practice_marker",
+      "pattern": "\\b(interface\\{\\}|ioutil\\.|callbacks?\\s*->\\s*async|class\\s*->\\s*hooks|old\\s+API|pre-modern\\s+pattern)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "go_common_footgun",
+      "pattern": "\\b(typed-nil|nil\\s+interface|err\\s+shadowed|loop-variable\\s+capture|deferred\\s+Close\\(\\)|value receiver.+sync\\.Mutex|early return before defer)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "js_ts_common_footgun",
+      "pattern": "\\b(forEach\\s+with\\s+async|floating promises?|non-null assertion|Promise\\.all\\s+rejects on first failure|\\|\\|\\s+vs\\s+\\?\\?|as\\s+casts\\s+bypass)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "cross_language_security_footgun",
+      "pattern": "\\b(TOCTOU|Time-of-Check-to-Time-of-Use|hostname validation|substring contains|evil-example\\.com|regex anchoring|unreleased resources)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "sdk_contextless_public_method",
+      "pattern": "(?m)^func \\(c \\*Client\\) [A-Z]\\w+\\((?!ctx\\s+context\\.Context)",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "custom_infra_reinvention",
+      "pattern": "\\b(custom|homegrown|hand.?rolled|roll your own|TODO.*standardize|should standardize|utils|helpers)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "resource_factory",
+      "pattern": "\\b(sql\\.Open|gorm\\.Open|mongoose\\.connect|createConnection|redis\\.NewClient|NewTicker|NewTimer|loadSystemPrompt|LoadConfig|readFileSync|os\\.ReadFile)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "custom_security_or_compliance_surface",
+      "pattern": "\\b(CSRF|JWT|password\\s+hash|session\\s+secret|encrypt|decrypt|HMAC|signature|sales\\s+tax|VAT|PCI)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "file_upload_boundary",
+      "pattern": "\\b(multipart|chunked\\s+upload|resumable\\s+upload|upload\\s+stream|file\\s+upload)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "path_traversal_user_file_access",
+      "pattern": "(?is)\\b(?:fs\\.(?:readFile|readFileSync|createReadStream)|os\\.(?:Open|ReadFile)|open|FileResponse|http\\.ServeFile|sendFile|download)\\s*\\([^;\\n]{0,240}\\b(?:req(?:uest)?\\.(?:query|params|body|url|form|args)|r\\.URL\\.Query\\(\\)\\.Get|request\\.(?:args|form|json|query_params|nextUrl\\.searchParams)|params\\s*\\[[\"'](?:path|file|filename)[\"']|searchParams\\.get\\s*\\(\\s*[\"'](?:path|file|filename)[\"'])",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "path_join_request_input",
+      "pattern": "(?is)\\b(?:path\\.(?:join|resolve)|filepath\\.(?:Join|Clean|Abs)|os\\.path\\.(?:join|abspath|normpath))\\s*\\([^;\\n]{0,240}\\b(?:req(?:uest)?\\.(?:query|params|body|url|form|args)|r\\.URL\\.Query\\(\\)\\.Get|request\\.(?:args|form|json|query_params|nextUrl\\.searchParams)|params\\s*\\[[\"'](?:path|file|filename)[\"']|searchParams\\.get\\s*\\(\\s*[\"'](?:path|file|filename)[\"'])",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "upload_user_filename_write",
+      "pattern": "(?is)\\b(?:fs\\.(?:writeFile|writeFileSync|createWriteStream)|os\\.(?:Create|OpenFile)|open|createWriteStream|saveAs|mv|move)\\s*\\([^;\\n]{0,260}\\b(?:file\\.originalname|req\\.file\\.originalname|req\\.files?\\[[^\\]]+\\]\\.name|uploadedFile\\.name|UploadFile\\.filename|\\.Filename\\b)",
+      "weight": 5,
+      "max_matches": 5
+    },
+    {
+      "id": "archive_extract_surface",
+      "pattern": "\\b(?:extractall\\s*\\(|tarfile\\.open\\s*\\(|zipfile\\.ZipFile\\s*\\(|new\\s+AdmZip\\s*\\(|extract[-]zip|unzipper\\.|archiver\\.|archive[/]zip|tar\\.x\\s*\\(|tar\\.extract\\s*\\()",
+      "weight": 4,
+      "max_matches": 5
+    },
+    {
+      "id": "rate_limit_boundary",
+      "pattern": "\\b(rate[-_ ]?limit|throttle|quota|token\\s+bucket|leaky\\s+bucket)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "pdf_or_email_delivery_boundary",
+      "pattern": "\\b(PDF\\s+generation|pdf-lib|puppeteer|SMTP|DKIM|SPF|email\\s+delivery|send\\s+email)\\b",
+      "weight": 2,
+      "max_matches": 5
+    },
+    {
+      "id": "vector_or_llm_infrastructure_boundary",
+      "pattern": "\\b(vector\\s+DB|vector\\s+database|similarity\\s+search|LLM\\s+integration|tool\\s+calling|embedding\\s+provider)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "formal_proof_boundary",
+      "pattern": "\\b(axiom|theorem|lemma|proof\\s+by\\s+contradiction|universal\\s+quantifier|existential\\s+quantifier|domain\\/codomain|formal\\s+system)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "invariant_or_symmetry_boundary",
+      "pattern": "\\b(invariant|symmetry\\s+group|coordinate[-_ ]?independent|diffeomorphism|gauge\\s+invariance|topolog(?:y|ical)|metric\\s+space|Hilbert\\s+space)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "math_edge_or_limit_boundary",
+      "pattern": "\\b(convergence\\s+proof|infinite\\s+series|boundary\\s+condition|degenerate\\s+case|dimensionality|fixed[-_ ]?point\\s+theorem|path\\s+integral)\\b",
+      "weight": 3,
+      "max_matches": 5
+    },
+    {
+      "id": "cache_without_invalidation_cue",
+      "pattern": "\\b(cache|Cache|Redis|Memcached)\\b(?:(?!\\b(invalidate|ttl|expire|expiration|evict|delete|purge)\\b).){0,240}\\b(Set|Put|Store|Remember)\\s*\\(",
+      "weight": 2,
+      "max_matches": 4
+    }
+  ]
+}
