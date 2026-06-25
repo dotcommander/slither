@@ -29,8 +29,8 @@ slither report [repo] [flags]
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--out` | `slither-report.md` | Output path; `-` writes to stdout. Switches to `slither-report.json` automatically when `--json` is set and `--out` is left at its default. |
-| `--top` | `30` | Maximum rows to include in the report. Must be positive. |
-| `--max-bytes` | `20000` | Maximum bytes inspected per file. Must be positive. |
+| `--top` | `80` | Maximum rows to include in the report. Must be positive. |
+| `--max-bytes` | `500000` | Maximum bytes inspected per file. Must be positive. |
 | `--days` | `90` | History window (days) for churn and bug-fix signals. Must be positive. |
 | `--patterns` | (embedded) | Path to a JSON path/content pattern file. Overrides the embedded `premium-model-triage` catalog. |
 | `--model` | (none) | Cheap model ID for wormhole scoring. Omit for deterministic fallback. |
@@ -45,7 +45,7 @@ slither report [repo] [flags]
 Deterministic offline report (no model):
 
 ```bash
-go run ./cmd/slither report /path/to/repo --out slither-report.md --top 30 --days 90
+go run ./cmd/slither report /path/to/repo --out slither-report.md --top 80 --days 90
 ```
 
 Machine-readable evidence envelope:
@@ -90,9 +90,24 @@ unless you override each explicitly.
 
 ## Output
 
-Reports include evidence layers, lane scores, the pattern source, and skipped
-signals, so missing evidence is visible rather than treated as low risk. On
-success the CLI prints `slither wrote <path> with <N> scored files`.
+Reports include discovery counts, evidence layers, lane scores, the pattern
+source, and skipped signals, so missing evidence is visible rather than treated
+as low risk. On success the CLI prints `slither wrote <path> with <N> scored
+files`.
+
+## Scan behavior
+
+These limits and heuristics are fixed in the scanner (not flags):
+
+| Behavior | Value |
+| --- | --- |
+| File discovery | `git ls-files` when the repo is a Git checkout; otherwise a filesystem walk. |
+| Skipped directories | `.git`, `node_modules`, `vendor`, `dist`, `build`, `target`, `coverage`, `.next`, `.svelte-kit`, `.venv`, `.work` |
+| Skipped file suffixes | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.pdf`, `.zip`, `.gz`, `.tar`, `.mp4`, `.mp3`, `.lock`, `.sum` |
+| Binary detection | A file is treated as binary (and skipped) if a NUL byte appears in its first 4096 bytes. |
+| Excerpt length | Per-file summaries are truncated to 180 characters with a trailing `...`. |
+| Test-gap signal | Non-test source files of 80 or more lines are flagged with a `test-gap` reason. |
+| Size signal | Files of 300 or more lines get a `size:<lines> lines` reason. |
 
 ## Security
 
