@@ -2,6 +2,22 @@
 
 `slither` is a cheap-model repo scout. It creeps like a snake through a repository, gathers bounded file evidence, optionally asks a cheap model through `github.com/garyblankenship/wormhole`, and writes a Markdown report.
 
+## Installation
+
+```bash
+go install github.com/dotcommander/slither/cmd/slither@latest
+```
+
+Build from source:
+
+```bash
+git clone https://github.com/dotcommander/slither.git
+cd slither
+go build -o slither ./cmd/slither
+```
+
+See [docs/usage.md](docs/usage.md) for the full flag reference and output format.
+
 ```bash
 go run ./cmd/slither report /path/to/repo --out slither-report.md --top 80 --days 90
 ```
@@ -22,7 +38,7 @@ go run ./cmd/slither report /path/to/repo --top 80 --cull --json --out slither-c
 
 ```bash
 go run ./cmd/slither report /path/to/repo \
-  --patterns /Users/vampire/.codex/skills/premium-model-triage/references/triage_patterns.json \
+  --patterns ./triage_patterns.json \
   --json --out slither-report.json
 ```
 
