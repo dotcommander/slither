@@ -96,6 +96,29 @@ as low risk. When writing to a file, the CLI prints `slither wrote <path> with <
 scored files` on success. With `--out -` the report streams to stdout and
 no success line is printed.
 
+### JSON envelope (`--json`)
+
+With `--json` the report is emitted as a single JSON object instead of
+Markdown. Top-level fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `run_label` | string | Constant `"slither_report"` identifying the payload. |
+| `repo` | string | Scanned repository path. |
+| `generated_at` | string (RFC 3339) | Report generation timestamp. |
+| `days` | int | Day window applied to discovery. |
+| `patterns_source` | string | Source of the scoring patterns (embedded catalog, or the `--patterns` file). |
+| `files_seen` | int | Files discovered before scoring. |
+| `files_reported` | int | Number of files included in `rows`. |
+| `discovery` | object | Discovery audit: `source`, `git_tracked`, `git_untracked`, `filesystem_files`, `candidate_files`. |
+| `model` | string | Model ID used (omitted when empty). |
+| `base_url` | string | Model base URL (omitted when empty). |
+| `skipped_signals` | string[] | Signals skipped during scanning (omitted when empty). |
+| `rows` | object[] | Per-file evidence. Each row carries `id`, `path`, `evidence_class`, `confidence`, `score`, `reasons`, `summary`, plus per-file risk and count fields. |
+| `first_read_queue` | object[] | Files to read first; each entry has `id`, `group`, `lane`, `confidence`, `reasons`, `files`, `caveat` (omitted when empty). |
+| `review_plan` | object[] | Review lanes; each has `id`, `lane`, `group`, `files`, `gates`, `verify`, `why`, `confidence`, `caveat` (omitted when empty). |
+| `cull_ledger` | object | Cull ledger, present when culling is enabled via `--cull`: which files were kept, demoted to alternates, or culled, with bucketed reasons (omitted otherwise). |
+
 ## Scan behavior
 
 These limits and heuristics are fixed in the scanner (not flags):
