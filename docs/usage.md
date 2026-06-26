@@ -39,6 +39,7 @@ slither report [repo] [flags]
 | `--local` | `false` | Use the local model profile (see below). |
 | `--json` | `false` | Emit a machine-readable JSON evidence envelope. |
 | `--cull` | `false` | Append a cheap-model cull ledger over reported rows. |
+| `--no-cache` | `false` | Disable the content-hash score cache (always re-score). |
 
 ## Examples
 
@@ -84,9 +85,39 @@ Score with a local OpenAI-compatible server:
 go run ./cmd/slither report /path/to/repo --local --out slither-report.md
 ```
 
-`--local` sets the model to `Qwen3.6-35B-A3B-oQ4-fp16-mtp`, the base URL to
-`http://127.0.0.1:8000/v1`, and the API key env var to `SLITHER_API_KEY`
-unless you override each explicitly.
+`--local` uses the `local` profile from the config file — by default model
+`Qwen3.6-35B-A3B-oQ4-fp16-mtp`, base URL `http://127.0.0.1:8000/v1`, and API key
+env var `SLITHER_API_KEY` — unless you override each explicitly.
+
+## Configuration file
+
+On first run `slither` writes `~/.config/slither/config.json` (on macOS:
+`~/Library/Application Support/slither/config.json`) with built-in defaults, then
+reads it on every run. It lets you set a default scoring model without passing
+flags or editing source:
+
+```json
+{
+  "model": "",
+  "base_url": "https://openrouter.ai/api/v1",
+  "api_key_env": "OPENROUTER_API_KEY",
+  "local": {
+    "model": "Qwen3.6-35B-A3B-oQ4-fp16-mtp",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "api_key_env": "SLITHER_API_KEY"
+  },
+  "fallback_models": []
+}
+```
+
+- **Precedence:** an explicit CLI flag overrides the config value, which overrides
+  the built-in default. `"model": ""` keeps the deterministic offline default; set
+  it to a model ID (e.g. `z-ai/glm-5.2`) to make scoring the default.
+- **`fallback_models`:** ordered backup model IDs; if the primary is rate-limited
+  or over quota, wormhole fails over to the next. Ignored under `--local`.
+- **Score cache:** model scores are cached at `~/.config/slither/cache/scores.json`,
+  keyed by file evidence + model, so re-runs skip unchanged files. Pass `--no-cache`
+  to disable. A missing or corrupt cache is ignored, never fatal.
 
 ## Output
 

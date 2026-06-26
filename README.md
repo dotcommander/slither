@@ -57,4 +57,4 @@ With a local OpenAI-compatible server:
 go run ./cmd/slither report /path/to/repo --local --out slither-report.md
 ```
 
-If no model is configured, `slither` uses a deterministic fallback score so the CLI is useful offline. Reports include discovery counts, evidence layers, lane scores, pattern source, and skipped signals so missing evidence is visible instead of treated as low risk.
+If no model is configured, `slither` uses a deterministic fallback score so the CLI is useful offline. A default model, base URL, API-key env var, and ordered `fallback_models` can be set in `~/.config/slither/config.json` (written on first run); CLI flags override it. Model scores are cached under `~/.config/slither/cache/` so re-runs skip unchanged files (`--no-cache` to disable). Reports include discovery counts, evidence layers, lane scores, pattern source, and skipped signals so missing evidence is visible instead of treated as low risk.
