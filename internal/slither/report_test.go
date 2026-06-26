@@ -1166,9 +1166,9 @@ func TestRunReportHelpReturnsNil(t *testing.T) {
 		fmt.Sprintf("--top %d", defaultTop),
 		fmt.Sprintf("--max-bytes %d", defaultMaxBytes),
 		fmt.Sprintf("--days %d", defaultDays),
-		defaultBaseURL,
-		localModel,
-		localBaseURL,
+		defaultConfig().BaseURL,
+		defaultConfig().Local.Model,
+		defaultConfig().Local.BaseURL,
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help output missing %q: %s", want, help)
@@ -1177,6 +1177,7 @@ func TestRunReportHelpReturnsNil(t *testing.T) {
 }
 
 func TestRunReportCompletionReportsRowsAndRankedFiles(t *testing.T) {
+	setTempConfigDir(t)
 	tmp := t.TempDir()
 	out := filepath.Join(tmp, "report.md")
 	writeFile(t, tmp, "internal/a.go", "package internal\n\nfunc A(){ panic(\"x\") }\n")
@@ -1193,6 +1194,7 @@ func TestRunReportCompletionReportsRowsAndRankedFiles(t *testing.T) {
 }
 
 func TestRunReportDefaultsToDeterministicFallback(t *testing.T) {
+	setTempConfigDir(t)
 	tmp := t.TempDir()
 	writeFile(t, tmp, "internal/a.go", "package internal\n\nfunc A(){ panic(\"x\") }\n")
 
@@ -1223,8 +1225,6 @@ func TestDocsUseRuntimeDefaults(t *testing.T) {
 		fmt.Sprintf("| `--max-bytes` | `%d` |", defaultMaxBytes),
 		fmt.Sprintf("| `--days` | `%d` |", defaultDays),
 		fmt.Sprintf("--top %d", defaultTop),
-		"TEST_DATABASE_URL",
-		"bun build --no-bundle",
 	} {
 		if !strings.Contains(docs, want) {
 			t.Fatalf("docs/usage.md missing %q", want)

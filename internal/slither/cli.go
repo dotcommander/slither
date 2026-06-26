@@ -12,15 +12,10 @@ import (
 )
 
 const (
-	defaultOut       = "slither-report.md"
-	defaultTop       = 80
-	defaultMaxBytes  = 500_000
-	defaultDays      = 90
-	defaultBaseURL   = "https://openrouter.ai/api/v1"
-	defaultAPIKeyEnv = "OPENROUTER_API_KEY"
-	localModel       = "Qwen3.6-35B-A3B-oQ4-fp16-mtp"
-	localBaseURL     = "http://127.0.0.1:8000/v1"
-	localAPIKeyEnv   = "SLITHER_API_KEY"
+	defaultOut      = "slither-report.md"
+	defaultTop      = 80
+	defaultMaxBytes = 500_000
+	defaultDays     = 90
 )
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -38,6 +33,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func printHelp(w io.Writer) {
+	cfg := defaultConfig()
 	fmt.Fprintf(w, `slither - a cheap-model scout that creeps through every path
 
 Usage:
@@ -52,7 +48,7 @@ Model scoring:
   Slither uses github.com/garyblankenship/wormhole for model calls, matching distill.
   If --model is omitted, slither uses deterministic fallback scoring.
   --local selects %s at %s unless overridden.
-`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, defaultBaseURL, localModel, localBaseURL)
+`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, cfg.BaseURL, cfg.Local.Model, cfg.Local.BaseURL)
 }
 
 func normalizeReportArgs(args []string) []string {
@@ -91,56 +87,72 @@ func normalizeReportArgs(args []string) []string {
 	return append(flags, positionals...)
 }
 
-func runReport(ctx context.Context, args []string, stdout io.Writer) error {
-	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
-		printHelp(stdout)
-		return nil
-	}
+// resolveReportOptions builds Options by precedence: explicit CLI flag >
+// config-file value > built-in default. Config values are seeded as the flag
+// defaults, so an unset flag yields the config value and an empty Model keeps
+// the deterministic offline path.
+func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, BaseURL: defaultBaseURL, APIKeyEnv: defaultAPIKeyEnv}
+	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv}
 	fs.StringVar(&opts.Out, "out", opts.Out, "Markdown report path, or - for stdout")
 	fs.IntVar(&opts.Top, "top", opts.Top, "ranked production files to include")
 	fs.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum bytes to inspect per file")
 	fs.IntVar(&opts.Days, "days", opts.Days, "history window in days for churn and bug-fix signals")
 	fs.StringVar(&opts.Patterns, "patterns", "", "JSON path/content pattern file")
-	fs.StringVar(&opts.Model, "model", "", "cheap model ID for wormhole scoring")
+	fs.StringVar(&opts.Model, "model", opts.Model, "cheap model ID for wormhole scoring")
 	fs.StringVar(&opts.BaseURL, "base-url", opts.BaseURL, "OpenAI-compatible base URL")
 	fs.StringVar(&opts.APIKeyEnv, "api-key-env", opts.APIKeyEnv, "environment variable containing the API key")
 	fs.BoolVar(&opts.Local, "local", false, "use local OpenAI-compatible model profile")
 	fs.BoolVar(&opts.JSON, "json", false, "emit a machine-readable JSON evidence envelope")
 	fs.BoolVar(&opts.Cull, "cull", false, "append a cheap-model cull ledger over reported rows")
 	if err := fs.Parse(normalizeReportArgs(args)); err != nil {
-		return err
+		return Options{}, err
 	}
 	if fs.NArg() > 1 {
-		return errors.New("report accepts at most one repo path")
+		return Options{}, errors.New("report accepts at most one repo path")
 	}
 	if fs.NArg() == 1 {
 		opts.Repo = fs.Arg(0)
 	}
 	if opts.Top <= 0 {
-		return errors.New("--top must be positive")
+		return Options{}, errors.New("--top must be positive")
 	}
 	if opts.MaxBytes <= 0 {
-		return errors.New("--max-bytes must be positive")
+		return Options{}, errors.New("--max-bytes must be positive")
 	}
 	if opts.Days <= 0 {
-		return errors.New("--days must be positive")
+		return Options{}, errors.New("--days must be positive")
 	}
 	if opts.JSON && opts.Out == defaultOut {
 		opts.Out = "slither-report.json"
 	}
 	if opts.Local {
 		if opts.Model == "" {
-			opts.Model = localModel
+			opts.Model = cfg.Local.Model
 		}
-		if opts.BaseURL == "" || opts.BaseURL == defaultBaseURL {
-			opts.BaseURL = localBaseURL
+		if opts.BaseURL == "" || opts.BaseURL == cfg.BaseURL {
+			opts.BaseURL = cfg.Local.BaseURL
 		}
-		if opts.APIKeyEnv == defaultAPIKeyEnv {
-			opts.APIKeyEnv = localAPIKeyEnv
+		if opts.APIKeyEnv == cfg.APIKeyEnv {
+			opts.APIKeyEnv = cfg.Local.APIKeyEnv
 		}
+	}
+	return opts, nil
+}
+
+func runReport(ctx context.Context, args []string, stdout io.Writer) error {
+	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
+		printHelp(stdout)
+		return nil
+	}
+	cfg, err := LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	opts, err := resolveReportOptions(cfg, args)
+	if err != nil {
+		return err
 	}
 
 	repo, err := filepath.Abs(opts.Repo)
