@@ -100,6 +100,53 @@ func TestRenderJSONIncludesEvidenceEnvelope(t *testing.T) {
 	}
 }
 
+func TestBuildReportAddsEvidenceMetadataAndReviewPlan(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "go.mod", "module example.test/app\n\nreplace example.test/lib => ../lib\n")
+	writeFile(t, tmp, "cmd/app/main.go", `package main
+
+import "os"
+
+func main() {
+	os.Exit(1)
+}
+`)
+	writeFile(t, tmp, "internal/config/config.go", `package config
+
+import "os"
+
+func Load() string {
+	return os.Getenv("SECRET_TOKEN")
+}
+`+strings.Repeat("// config filler\n", 80))
+
+	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Rows) == 0 {
+		t.Fatal("expected report rows")
+	}
+	for _, row := range report.Rows {
+		if row.ID == "" || row.EvidenceClass == "" || row.Confidence == "" {
+			t.Fatalf("row missing metadata: %#v", row)
+		}
+		if strings.HasSuffix(row.Path, ".go") && row.VerifyCmd == "" {
+			t.Fatalf("go row missing verify command: %#v", row)
+		}
+	}
+	if !reviewQueueHasGroup(report.FirstReadQueue, "user-surface") {
+		t.Fatalf("first-read queue missing user-surface: %#v", report.FirstReadQueue)
+	}
+	if !reviewPlanHasLane(report.ReviewPlan, "cli-ux") {
+		t.Fatalf("review plan missing cli-ux lane: %#v", report.ReviewPlan)
+	}
+	cliLane := findReviewLane(report.ReviewPlan, "cli-ux")
+	if !contains(cliLane.Gates, "help-text accuracy") || !contains(cliLane.Verify, "go build ./...") {
+		t.Fatalf("cli lane missing gates/verify: %#v", cliLane)
+	}
+}
+
 func TestRenderJSONIncludesCullLedger(t *testing.T) {
 	report := Report{
 		Repo:      "/repo",
@@ -107,6 +154,9 @@ func TestRenderJSONIncludesCullLedger(t *testing.T) {
 		Rows: []FileEvidence{{
 			Path:           "auth.go",
 			Score:          5,
+			EvidenceClass:  "heuristic",
+			Confidence:     "high",
+			VerifyCmd:      "go test ./...",
 			PathRisk:       5,
 			ContentRisk:    5,
 			EvidenceLayers: []string{"path-risk", "content-risk", "test-void"},
@@ -129,6 +179,12 @@ func TestRenderJSONIncludesCullLedger(t *testing.T) {
 	}
 	if got := payload.CullLedger.KeptForPremium.Examples[0].StrongestEvidenceIntersection; got == "" || got == "unknown" {
 		t.Fatalf("strongest intersection = %q, want concrete evidence", got)
+	}
+	if payload.CullLedger.KeptForPremium.Examples[0].Confidence != "high" {
+		t.Fatalf("cull example missing confidence: %#v", payload.CullLedger.KeptForPremium.Examples[0])
+	}
+	if len(payload.CullLedger.ReviewPlan) == 0 {
+		t.Fatalf("cull ledger missing review plan: %#v", payload.CullLedger)
 	}
 }
 
@@ -155,6 +211,28 @@ func TestBuildCullLedgerBucketsRows(t *testing.T) {
 			t.Fatalf("bucket missing examples: %#v", bucket)
 		}
 	}
+}
+
+func reviewQueueHasGroup(queue []ReviewQueue, group string) bool {
+	for _, item := range queue {
+		if item.Group == group {
+			return true
+		}
+	}
+	return false
+}
+
+func reviewPlanHasLane(plan []ReviewLane, lane string) bool {
+	return findReviewLane(plan, lane).Lane != ""
+}
+
+func findReviewLane(plan []ReviewLane, lane string) ReviewLane {
+	for _, item := range plan {
+		if item.Lane == lane {
+			return item
+		}
+	}
+	return ReviewLane{}
 }
 
 func TestNormalizeReportArgsAllowsFlagsAfterRepo(t *testing.T) {

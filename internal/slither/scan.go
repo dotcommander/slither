@@ -69,6 +69,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 				evidence.EvidenceLayers = mergeLayers(fallbackLayers, []string{"model"})
 			}
 		}
+		finalizeEvidenceMetadata(&evidence)
 		report.Rows = append(report.Rows, evidence)
 	}
 	sort.SliceStable(report.Rows, func(i, j int) bool {
@@ -121,6 +122,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		report.Rows = report.Rows[:opts.Top]
 	}
 	report.FilesScored = len(report.Rows)
+	report.FirstReadQueue, report.ReviewPlan = BuildReviewPlan(report.Rows)
 	return report, nil
 }
 

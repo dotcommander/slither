@@ -75,6 +75,9 @@ func RenderMarkdown(report Report) string {
 			escapeCell(row.Summary),
 		)
 	}
+	if len(report.ReviewPlan) > 0 {
+		writeReviewPlanMarkdown(&b, report.ReviewPlan)
+	}
 	if report.CullLedger != nil {
 		fmt.Fprintf(&b, "\n## Cheap-Model Cull Ledger\n\n")
 		fmt.Fprintf(&b, "- Stop reason: `%s`\n", report.CullLedger.StopReason)
@@ -105,6 +108,8 @@ func RenderJSON(report Report) ([]byte, error) {
 		BaseURL:        report.BaseURL,
 		SkippedSignals: report.SkippedSignals,
 		Rows:           report.Rows,
+		FirstReadQueue: report.FirstReadQueue,
+		ReviewPlan:     report.ReviewPlan,
 		CullLedger:     report.CullLedger,
 	}
 	return json.MarshalIndent(payload, "", "  ")
@@ -124,6 +129,8 @@ type reportEnvelope struct {
 	BaseURL        string         `json:"base_url,omitempty"`
 	SkippedSignals []string       `json:"skipped_signals,omitempty"`
 	Rows           []FileEvidence `json:"rows"`
+	FirstReadQueue []ReviewQueue  `json:"first_read_queue,omitempty"`
+	ReviewPlan     []ReviewLane   `json:"review_plan,omitempty"`
 	CullLedger     *CullLedger    `json:"cull_ledger,omitempty"`
 }
 
@@ -152,4 +159,21 @@ func writeCullBucketMarkdown(b *strings.Builder, name string, bucket CullBucket)
 		)
 	}
 	fmt.Fprintf(b, "\n")
+}
+
+func writeReviewPlanMarkdown(b *strings.Builder, plan []ReviewLane) {
+	fmt.Fprintf(b, "\n## Review Plan\n\n")
+	fmt.Fprintf(b, "| lane | files | gates | verify | why |\n")
+	fmt.Fprintf(b, "| --- | --- | --- | --- | --- |\n")
+	for _, lane := range plan {
+		fmt.Fprintf(
+			b,
+			"| `%s` | %s | %s | %s | %s |\n",
+			lane.Lane,
+			escapeCell(strings.Join(lane.Files, ", ")),
+			escapeCell(strings.Join(lane.Gates, ", ")),
+			escapeCell(strings.Join(lane.Verify, ", ")),
+			escapeCell(strings.Join(lane.Why, ", ")),
+		)
+	}
 }

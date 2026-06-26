@@ -6,6 +6,11 @@ import (
 )
 
 func BuildCullLedger(report Report) CullLedger {
+	firstReadQueue := report.FirstReadQueue
+	reviewPlan := report.ReviewPlan
+	if len(firstReadQueue) == 0 && len(reviewPlan) == 0 {
+		firstReadQueue, reviewPlan = BuildReviewPlan(report.Rows)
+	}
 	ledger := CullLedger{
 		RunLabel:       "slither_cull_ledger",
 		Repo:           report.Repo,
@@ -13,6 +18,8 @@ func BuildCullLedger(report Report) CullLedger {
 		RowsConsidered: len(report.Rows),
 		StopReason:     "deterministic cull complete; premium review should start with kept_for_premium",
 		SkippedSignals: report.SkippedSignals,
+		FirstReadQueue: firstReadQueue,
+		ReviewPlan:     reviewPlan,
 		KeptForPremium: CullBucket{Examples: []CullEntry{}},
 		Alternates:     CullBucket{Examples: []CullEntry{}},
 		Generated:      CullBucket{Examples: []CullEntry{}},
@@ -66,6 +73,10 @@ func cullEntry(row FileEvidence, reason string) CullEntry {
 	return CullEntry{
 		Path:                          row.Path,
 		Score:                         row.Score,
+		EvidenceClass:                 row.EvidenceClass,
+		Confidence:                    row.Confidence,
+		Caveat:                        row.Caveat,
+		VerifyCmd:                     row.VerifyCmd,
 		EvidenceLayers:                row.EvidenceLayers,
 		StrongestEvidenceIntersection: strongestEvidenceIntersection(row),
 		Reason:                        reason,

@@ -18,7 +18,13 @@ type Options struct {
 }
 
 type FileEvidence struct {
+	ID                     string   `json:"id,omitempty"`
 	Path                   string   `json:"path"`
+	EvidenceClass          string   `json:"evidence_class,omitempty"`
+	Confidence             string   `json:"confidence,omitempty"`
+	Caveat                 string   `json:"caveat,omitempty"`
+	VerifyCmd              string   `json:"verify_cmd,omitempty"`
+	OmittedReason          string   `json:"omitted_reason,omitempty"`
 	Bytes                  int64    `json:"bytes"`
 	Lines                  int      `json:"lines"`
 	Score                  int      `json:"score"`
@@ -77,23 +83,27 @@ type Report struct {
 	BaseURL        string
 	SkippedSignals []string
 	Rows           []FileEvidence
+	FirstReadQueue []ReviewQueue
+	ReviewPlan     []ReviewLane
 	CullLedger     *CullLedger
 }
 
 type CullLedger struct {
-	RunLabel       string     `json:"run_label"`
-	Repo           string     `json:"repo"`
-	GeneratedAt    time.Time  `json:"generated_at"`
-	RowsConsidered int        `json:"rows_considered"`
-	StopReason     string     `json:"stop_reason"`
-	SkippedSignals []string   `json:"skipped_signals,omitempty"`
-	KeptForPremium CullBucket `json:"kept_for_premium"`
-	Alternates     CullBucket `json:"alternates"`
-	Generated      CullBucket `json:"culled_generated_or_report"`
-	TestOnly       CullBucket `json:"culled_test_only"`
-	LowSignal      CullBucket `json:"culled_low_signal"`
-	Duplicate      CullBucket `json:"culled_duplicate_surface"`
-	NeedsEvidence  CullBucket `json:"needs_more_evidence"`
+	RunLabel       string        `json:"run_label"`
+	Repo           string        `json:"repo"`
+	GeneratedAt    time.Time     `json:"generated_at"`
+	RowsConsidered int           `json:"rows_considered"`
+	StopReason     string        `json:"stop_reason"`
+	SkippedSignals []string      `json:"skipped_signals,omitempty"`
+	KeptForPremium CullBucket    `json:"kept_for_premium"`
+	Alternates     CullBucket    `json:"alternates"`
+	Generated      CullBucket    `json:"culled_generated_or_report"`
+	TestOnly       CullBucket    `json:"culled_test_only"`
+	LowSignal      CullBucket    `json:"culled_low_signal"`
+	Duplicate      CullBucket    `json:"culled_duplicate_surface"`
+	NeedsEvidence  CullBucket    `json:"needs_more_evidence"`
+	FirstReadQueue []ReviewQueue `json:"first_read_queue,omitempty"`
+	ReviewPlan     []ReviewLane  `json:"review_plan,omitempty"`
 }
 
 type CullBucket struct {
@@ -104,7 +114,37 @@ type CullBucket struct {
 type CullEntry struct {
 	Path                          string   `json:"path"`
 	Score                         int      `json:"score"`
+	EvidenceClass                 string   `json:"evidence_class,omitempty"`
+	Confidence                    string   `json:"confidence,omitempty"`
+	Caveat                        string   `json:"caveat,omitempty"`
+	VerifyCmd                     string   `json:"verify_cmd,omitempty"`
 	EvidenceLayers                []string `json:"evidence_layers,omitempty"`
 	StrongestEvidenceIntersection string   `json:"strongest_evidence_intersection,omitempty"`
 	Reason                        string   `json:"reason"`
+}
+
+type ReviewQueue struct {
+	ID            string   `json:"id"`
+	Group         string   `json:"group"`
+	Lane          string   `json:"lane"`
+	EvidenceClass string   `json:"evidence_class,omitempty"`
+	Confidence    string   `json:"confidence,omitempty"`
+	Reasons       []string `json:"reasons"`
+	Caveat        string   `json:"caveat,omitempty"`
+	Files         []string `json:"files"`
+	OmittedReason string   `json:"omitted_reason,omitempty"`
+}
+
+type ReviewLane struct {
+	ID            string   `json:"id"`
+	Lane          string   `json:"lane"`
+	Group         string   `json:"group"`
+	EvidenceClass string   `json:"evidence_class,omitempty"`
+	Confidence    string   `json:"confidence,omitempty"`
+	Files         []string `json:"files"`
+	Caveat        string   `json:"caveat,omitempty"`
+	Gates         []string `json:"gates"`
+	Verify        []string `json:"verify"`
+	Why           []string `json:"why"`
+	OmittedReason string   `json:"omitted_reason,omitempty"`
 }
