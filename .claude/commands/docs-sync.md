@@ -47,6 +47,10 @@ Then stop — bootstrap is the whole run. On the next invocation, Phase 2 runs.
 - Read source to confirm interfaces; documentation must match real behavior.
 - Make the smallest correct edit. Do not rewrite docs that are already accurate.
 - Do not invent flags, defaults, commands, or examples.
+- Before declaring a doc statement wrong, grep the whole package for the
+  feature — absence in the CLI entry file is not absence in the code. Defaults
+  can live anywhere (e.g. a `//go:embed` catalog used when a flag is empty), so
+  confirm against all source files, not just the command-parsing file.
 - All code/doc writes go through the project's executor agent, not direct Edit
   in the orchestrator, per the repo's editing rules.
 - After writing, if the tree builds/docs are self-consistent, commit with a
