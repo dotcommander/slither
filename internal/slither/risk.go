@@ -757,6 +757,10 @@ func hotspotRisk(complexity, churn, fixTouches, incomingRefs int) (int, []string
 		score += 2
 		reasons = append(reasons, "hotspot:bugfix_complexity")
 	}
+	if complexity >= 60 {
+		score += 3
+		reasons = append(reasons, "hotspot:high_complexity_static:"+itoa(complexity))
+	}
 	return score, reasons
 }
 
