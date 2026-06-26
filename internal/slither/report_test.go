@@ -2073,3 +2073,64 @@ func slicesEqual(got, want []string) bool {
 	}
 	return true
 }
+
+func TestScoreTopRowsCachedReportsHitMissCounts(t *testing.T) {
+	t.Parallel()
+	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
+	hitRow := baseEvidence("hit.go", 2)
+	missRow := baseEvidence("miss.go", 2)
+	cache.entries[scoreCacheKey("m", hitRow)] = cachedScore{Score: 5, Summary: "cached"}
+	s := &ModelScorer{model: "m", generate: func(_ context.Context, _ string, _ int) (string, error) {
+		return `[{"index":0,"score":4,"summary":"fresh","reasons":["r"]}]`, nil
+	}}
+	rows := []FileEvidence{hitRow, missRow}
+	hits, misses := scoreTopRowsCached(context.Background(), s, rows, cache)
+	if hits != 1 || misses != 1 {
+		t.Fatalf("hits=%d misses=%d, want 1 and 1", hits, misses)
+	}
+}
+
+func TestRenderMarkdownIncludesCacheStats(t *testing.T) {
+	report := Report{
+		Repo:       "/repo",
+		Model:      "m",
+		BaseURL:    "http://x",
+		Rows:       []FileEvidence{{Path: "a.go", Score: 3, Reasons: []string{"path:auth"}}},
+		CacheStats: &CacheStats{Hits: 7, Misses: 3},
+	}
+	md := RenderMarkdown(report)
+	if !strings.Contains(md, "Score cache: `7` hits, `3` misses") {
+		t.Fatalf("markdown missing cache stats footer:\n%s", md)
+	}
+}
+
+func TestRenderJSONIncludesCacheStats(t *testing.T) {
+	report := Report{Repo: "/repo", CacheStats: &CacheStats{Hits: 2, Misses: 4}, Rows: []FileEvidence{{Path: "a.go"}}}
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		CacheStats *CacheStats `json:"cache_stats"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.CacheStats == nil || payload.CacheStats.Hits != 2 || payload.CacheStats.Misses != 4 {
+		t.Fatalf("cache stats missing from envelope: %s", data)
+	}
+}
+
+func TestRenderOmitsCacheStatsWhenAbsent(t *testing.T) {
+	report := Report{Repo: "/repo", Rows: []FileEvidence{{Path: "a.go"}}}
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "cache_stats") {
+		t.Fatalf("run without cache should omit cache_stats from JSON: %s", data)
+	}
+	if md := RenderMarkdown(report); strings.Contains(md, "Score cache:") {
+		t.Fatalf("run without cache should omit cache stats from markdown:\n%s", md)
+	}
+}

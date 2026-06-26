@@ -2,6 +2,8 @@ package slither
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -93,5 +95,90 @@ func TestLoadScoreCacheCorruptIgnored(t *testing.T) {
 	cache := loadScoreCache()
 	if len(cache.entries) != 0 {
 		t.Fatalf("corrupt cache not ignored: %v", cache.entries)
+	}
+}
+
+func TestScoreCachePrunesOverCapKeepingUsed(t *testing.T) {
+	t.Parallel()
+	c := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
+	for i := 0; i < maxCacheEntries+10; i++ {
+		c.entries[fmt.Sprintf("k%d", i)] = cachedScore{Score: 3}
+	}
+	usedKeys := []string{"k0", "k1", "k2"}
+	for _, k := range usedKeys {
+		if _, ok := c.lookup(k); !ok {
+			t.Fatalf("seed key %s missing", k)
+		}
+	}
+	if !c.prune() {
+		t.Fatal("prune should report a change when over cap")
+	}
+	if len(c.entries) > maxCacheEntries {
+		t.Fatalf("entries = %d, want <= %d", len(c.entries), maxCacheEntries)
+	}
+	for _, k := range usedKeys {
+		if _, ok := c.entries[k]; !ok {
+			t.Fatalf("used key %s was evicted by prune", k)
+		}
+	}
+}
+
+func TestScoreCacheUnderCapNotPruned(t *testing.T) {
+	t.Parallel()
+	c := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
+	c.entries["a"] = cachedScore{Score: 2}
+	if c.prune() {
+		t.Fatal("under-cap prune should report no change")
+	}
+	if len(c.entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (untouched)", len(c.entries))
+	}
+}
+
+func TestScoreCacheAllHitOverCapRewritesSmaller(t *testing.T) {
+	setTempConfigDir(t) // NOT parallel: mutates userConfigDir seam
+	big := map[string]cachedScore{}
+	for i := 0; i < maxCacheEntries+50; i++ {
+		big[fmt.Sprintf("k%d", i)] = cachedScore{Score: 3}
+	}
+	path, err := scoreCachePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(big, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := loadScoreCache()
+	if _, ok := c.lookup("k0"); !ok { // an all-hit run: lookups only, no put
+		t.Fatal("seed key k0 missing after reload")
+	}
+	if len(c.dirty) != 0 {
+		t.Fatalf("all-hit run should have no dirty writes: %v", c.dirty)
+	}
+	if err := c.persist(); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() >= before.Size() {
+		t.Fatalf("over-cap file not shrunk: before=%d after=%d", before.Size(), after.Size())
+	}
+	reloaded := loadScoreCache()
+	if len(reloaded.entries) > maxCacheEntries {
+		t.Fatalf("persisted entries = %d, want <= cap %d", len(reloaded.entries), maxCacheEntries)
 	}
 }

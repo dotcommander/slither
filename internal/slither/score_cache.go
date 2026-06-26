@@ -14,6 +14,12 @@ import (
 // without a manual cache wipe.
 const promptVersion = "1"
 
+// maxCacheEntries caps scores.json so a long-lived cache cannot grow without
+// bound. On persist, entries beyond the cap are pruned, always retaining the
+// keys used (hit or written) this run; cold entries for files no longer scanned
+// are dropped first.
+const maxCacheEntries = 5000
+
 // cachedScore is the persisted model result for one file. Only genuine model
 // scores are stored — degraded (model_error) rows are never cached.
 type cachedScore struct {
@@ -29,6 +35,7 @@ type scoreCache struct {
 	path    string
 	entries map[string]cachedScore
 	dirty   map[string]cachedScore
+	used    map[string]bool
 }
 
 func scoreCachePath() (string, error) {
@@ -42,7 +49,7 @@ func scoreCachePath() (string, error) {
 // loadScoreCache reads the cache file, returning an empty (but usable) cache on
 // any error — a missing, unreadable, or corrupt file never fails the run.
 func loadScoreCache() *scoreCache {
-	c := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}}
+	c := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
 	path, err := scoreCachePath()
 	if err != nil {
 		return c
@@ -64,18 +71,65 @@ func loadScoreCache() *scoreCache {
 
 func (c *scoreCache) lookup(key string) (cachedScore, bool) {
 	cs, ok := c.entries[key]
+	if ok {
+		c.markUsed(key)
+	}
 	return cs, ok
 }
 
 func (c *scoreCache) put(key string, cs cachedScore) {
 	c.entries[key] = cs
 	c.dirty[key] = cs
+	c.markUsed(key)
+}
+
+// markUsed records a key touched this run. Lazy-inits the map so cache literals
+// constructed without a used map (e.g. in tests) never panic on a nil write.
+func (c *scoreCache) markUsed(key string) {
+	if c.used == nil {
+		c.used = map[string]bool{}
+	}
+	c.used[key] = true
+}
+
+// prune drops cold entries when the cache exceeds maxCacheEntries, always
+// keeping every key used this run, then filling remaining capacity with
+// arbitrary other entries up to the cap. Returns true when it removed entries so
+// persist knows to rewrite even when no dirty writes occurred.
+func (c *scoreCache) prune() bool {
+	if len(c.entries) <= maxCacheEntries {
+		return false
+	}
+	kept := make(map[string]cachedScore, maxCacheEntries)
+	for key := range c.used {
+		if cs, ok := c.entries[key]; ok {
+			kept[key] = cs
+		}
+	}
+	for key, cs := range c.entries {
+		if len(kept) >= maxCacheEntries {
+			break
+		}
+		if _, ok := kept[key]; ok {
+			continue
+		}
+		kept[key] = cs
+	}
+	if len(kept) == len(c.entries) {
+		return false
+	}
+	c.entries = kept
+	return true
 }
 
 // persist writes the merged cache when new entries were added. Best-effort: the
 // caller ignores the error since the cache is an optimization, not a result.
 func (c *scoreCache) persist() error {
-	if c.path == "" || len(c.dirty) == 0 {
+	if c.path == "" {
+		return nil
+	}
+	pruned := c.prune()
+	if len(c.dirty) == 0 && !pruned {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
@@ -134,9 +188,9 @@ func cacheableResult(e FileEvidence) bool {
 // goroutines in scoreTopRows never touch the cache, so no map is shared across
 // goroutines. Keys are derived from the deterministic state before scoring, so a
 // future run reproduces the same key. Misses keep their original positions.
-func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, cache *scoreCache) {
+func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, cache *scoreCache) (hits, misses int) {
 	if scorer == nil || cache == nil || len(rows) == 0 {
-		return
+		return 0, 0
 	}
 	keys := make([]string, len(rows))
 	var missIdx []int
@@ -145,13 +199,15 @@ func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvi
 		keys[i] = scoreCacheKey(scorer.model, rows[i])
 		if cs, ok := cache.lookup(keys[i]); ok {
 			applyCachedScore(&rows[i], cs)
+			hits++
 			continue
 		}
 		missIdx = append(missIdx, i)
 		missRows = append(missRows, rows[i])
 	}
+	misses = len(missRows)
 	if len(missRows) == 0 {
-		return
+		return hits, misses
 	}
 	scoreTopRows(ctx, scorer, missRows, modelBatchSize, modelScoreConcurrency)
 	for j, idx := range missIdx {
@@ -160,4 +216,5 @@ func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvi
 			cache.put(keys[idx], cachedScore{Score: missRows[j].Score, Summary: missRows[j].Summary, Reasons: missRows[j].Reasons})
 		}
 	}
+	return hits, misses
 }

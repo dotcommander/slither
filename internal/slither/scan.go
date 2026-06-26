@@ -79,8 +79,9 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 			scoreTopRows(ctx, scorer, rows[:scoreLimit], modelBatchSize, modelScoreConcurrency)
 		} else {
 			cache := loadScoreCache()
-			scoreTopRowsCached(ctx, scorer, rows[:scoreLimit], cache)
+			hits, misses := scoreTopRowsCached(ctx, scorer, rows[:scoreLimit], cache)
 			_ = cache.persist()
+			report.CacheStats = &CacheStats{Hits: hits, Misses: misses}
 		}
 	}
 	for i := range rows {

@@ -88,6 +88,14 @@ type Report struct {
 	FirstReadQueue []ReviewQueue
 	ReviewPlan     []ReviewLane
 	CullLedger     *CullLedger
+	CacheStats     *CacheStats
+}
+
+// CacheStats reports score-cache effectiveness for a run. Nil (omitted) when
+// scoring did not run with the cache (no model, or --no-cache).
+type CacheStats struct {
+	Hits   int `json:"hits"`
+	Misses int `json:"misses"`
 }
 
 type CullLedger struct {

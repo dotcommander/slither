@@ -25,6 +25,9 @@ func RenderMarkdown(report Report) string {
 	} else {
 		fmt.Fprintf(&b, "- Scoring: wormhole model `%s` at `%s`\n\n", report.Model, report.BaseURL)
 	}
+	if report.CacheStats != nil {
+		fmt.Fprintf(&b, "- Score cache: `%d` hits, `%d` misses\n\n", report.CacheStats.Hits, report.CacheStats.Misses)
+	}
 	if len(report.SkippedSignals) > 0 {
 		fmt.Fprintf(&b, "- Skipped signals: `%s`\n\n", strings.Join(report.SkippedSignals, "`, `"))
 	}
@@ -407,6 +410,7 @@ func RenderJSON(report Report) ([]byte, error) {
 		FirstReadQueue: report.FirstReadQueue,
 		ReviewPlan:     report.ReviewPlan,
 		CullLedger:     report.CullLedger,
+		CacheStats:     report.CacheStats,
 	}
 	return json.MarshalIndent(payload, "", "  ")
 }
@@ -428,6 +432,7 @@ type reportEnvelope struct {
 	FirstReadQueue []ReviewQueue  `json:"first_read_queue,omitempty"`
 	ReviewPlan     []ReviewLane   `json:"review_plan,omitempty"`
 	CullLedger     *CullLedger    `json:"cull_ledger,omitempty"`
+	CacheStats     *CacheStats    `json:"cache_stats,omitempty"`
 }
 
 func escapeCell(s string) string {
