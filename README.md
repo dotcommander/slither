@@ -34,7 +34,7 @@ Append an auditable cheap-model cull ledger with kept targets, alternates, culle
 go run ./cmd/slither report /path/to/repo --top 80 --cull --json --out slither-cull.json
 ```
 
-`slither` embeds the full `premium-model-triage` pattern catalog by default. Use `--patterns` only when testing or overriding that catalog:
+`slither` embeds its deterministic pattern catalog by default. Use `--patterns` only when testing or overriding that catalog:
 
 ```bash
 go run ./cmd/slither report /path/to/repo \
@@ -46,7 +46,7 @@ With OpenRouter via wormhole:
 
 ```bash
 OPENROUTER_API_KEY=... go run ./cmd/slither report /path/to/repo \
-  --model z-ai/glm-5.2 \
+  --model deepseek/deepseek-v4-pro \
   --base-url https://openrouter.ai/api/v1 \
   --out slither-report.md
 ```
@@ -57,4 +57,4 @@ With a local OpenAI-compatible server:
 go run ./cmd/slither report /path/to/repo --local --out slither-report.md
 ```
 
-If no model is configured, `slither` uses a deterministic fallback score so the CLI is useful offline. Reports include discovery counts, evidence layers, lane scores, pattern source, and skipped signals so missing evidence is visible instead of treated as low risk.
+By default `slither` scores with `deepseek/deepseek-v4-pro` via OpenRouter; set `OPENROUTER_API_KEY` (or pass `--model` / `--local` to change it). When a model call fails — no key, offline, or an unparsable response — `slither` keeps the deterministic fallback score for that file and marks it `model_error`, so the report still renders. Reports include discovery counts, evidence layers, lane scores, pattern source, and skipped signals so missing evidence is visible instead of treated as low risk.
