@@ -123,7 +123,7 @@ var fallbackContentPatterns = []contentPattern{
 	pattern("archive_extract_surface", `\b(?:extractall\s*\(|tarfile\.open\s*\(|zipfile\.ZipFile\s*\(|new\s+AdmZip\s*\(|extract[-]zip|unzipper\.|archiver\.|archive[/]zip|tar\.x\s*\(|tar\.extract\s*\()`, 4, 5, "content-risk"),
 	pattern("hardcoded_private_key", `-----BEGIN [A-Z ]*PRIVATE KEY-----`, 5, 3, "secret-risk"),
 	pattern("provider_token_literal", `\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})`, 5, 5, "secret-risk"),
-	pattern("credential_assignment_literal", `(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\b\s*[:=]\s*["'](?!(?:local-)?placeholder["']|example["']|dummy["']|test["']|changeme["'])[^"']{12,}["']`, 4, 5, "secret-risk"),
+	pattern("credential_assignment_literal", `(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\b\s*[:=]\s*["'](?!(?:local-)?placeholder["']|example["']|dummy["']|test["']|changeme["']|your[-_][^"']*["'])[^"']{12,}["']`, 4, 5, "secret-risk"),
 	pattern("background_context", `\bcontext\.Background\s*\(`, 2, 4, "unknowns"),
 	pattern("resource_lifecycle", `\b(Open|Connect|NewClient|NewRequest|http\.Client|sql\.Open)\s*\(`, 2, 4, "unknowns"),
 	pattern("read_all_or_global_growth", `\bio\.ReadAll\s*\(|append\s*\([^)]*\.\.\.\)`, 3, 5, "unknowns"),

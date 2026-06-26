@@ -74,12 +74,25 @@ func finalizeEvidenceMetadata(repo string, row *FileEvidence) {
 }
 
 func BuildReviewPlan(rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
+	return BuildReviewPlanForRepo("", rows)
+}
+
+func BuildReviewPlanForRepo(repo string, rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
 	grouped := map[string]*ReviewQueue{}
+	rowByPath := map[string]FileEvidence{}
+	rankByPath := map[string]int{}
 	for _, row := range rows {
+		if _, ok := rowByPath[row.Path]; !ok {
+			rowByPath[row.Path] = row
+			rankByPath[row.Path] = len(rankByPath)
+		}
 		if !includeInReviewPlan(row) {
 			continue
 		}
 		for _, rule := range reviewLaneRules {
+			if !reviewRuleAppliesToRow(rule, row) {
+				continue
+			}
 			if !rule.match(row) {
 				continue
 			}
@@ -106,7 +119,7 @@ func BuildReviewPlan(rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
 
 	queue := make([]ReviewQueue, 0, len(grouped))
 	for _, item := range grouped {
-		slices.Sort(item.Files)
+		sortReviewFiles(item.Files, item.Lane, rowByPath, rankByPath)
 		slices.Sort(item.Reasons)
 		if total := len(item.Files); total > 12 {
 			item.Files = item.Files[:12]
@@ -122,7 +135,56 @@ func BuildReviewPlan(rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
 		return strings.Compare(a.Group, b.Group)
 	})
 
-	return queue, buildReviewLanes(queue)
+	return queue, buildReviewLanes(repo, queue, rowByPath)
+}
+
+func sortReviewFiles(files []string, lane string, rowByPath map[string]FileEvidence, rankByPath map[string]int) {
+	slices.SortFunc(files, func(a, b string) int {
+		left := reviewLaneFilePriority(lane, rowByPath[a])
+		right := reviewLaneFilePriority(lane, rowByPath[b])
+		if left != right {
+			return right - left
+		}
+		return rankByPath[a] - rankByPath[b]
+	})
+}
+
+func reviewLaneFilePriority(lane string, row FileEvidence) int {
+	switch lane {
+	case "api-contracts":
+		return row.OpenAPIContractRisk*10 + row.CORSSecurityRisk*8 + row.CookieSecurityRisk*8 + row.SDKDXRisk*4
+	case "data-integrity":
+		return row.MigrationSafetyRisk*10 + row.StaleMarkerRisk*6 + row.EnvContractRisk*4 + row.PathRisk
+	case "error-handling":
+		return reasonCount(row, "shell_boundary")*6 + reasonCount(row, "process_exit")*6 + reasonCount(row, "error_context_dropped")*4
+	case "lifecycle-concurrency":
+		return row.FlakeRisk*6 + reasonCount(row, "background_context")*4 + reasonCount(row, "concurrency")*4
+	case "performance":
+		return row.HotspotRisk*4 + row.Lines/100 + reasonCount(row, "read_all_or_global_growth")*4
+	case "test-risk":
+		return row.FlakeRisk*6 + row.OracleRisk*6 + boolScore(row.TestGap)*4
+	case "coupling":
+		return row.CentralityRisk*6 + row.CochangeRisk*4 + row.OwnershipRisk*3
+	default:
+		return 0
+	}
+}
+
+func reasonCount(row FileEvidence, needle string) int {
+	count := 0
+	for _, reason := range row.Reasons {
+		if strings.Contains(reason, needle) {
+			count++
+		}
+	}
+	return count
+}
+
+func boolScore(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func includeInReviewPlan(row FileEvidence) bool {
@@ -132,10 +194,23 @@ func includeInReviewPlan(row FileEvidence) bool {
 	if isTestPath(row.Path) {
 		return isTestRiskRow(row)
 	}
+	if stringSliceContains(row.EvidenceLayers, "low-signal") {
+		return false
+	}
+	if needsMoreEvidence(row) && !keepForPremium(row) {
+		return false
+	}
+	return keepForPremium(row) || row.Score >= 3
+}
+
+func reviewRuleAppliesToRow(rule reviewLaneRule, row FileEvidence) bool {
+	if isTestPath(row.Path) {
+		return rule.group == "test-risk"
+	}
 	return true
 }
 
-func buildReviewLanes(queue []ReviewQueue) []ReviewLane {
+func buildReviewLanes(repo string, queue []ReviewQueue, rowByPath map[string]FileEvidence) []ReviewLane {
 	type laneAcc struct {
 		files         []string
 		why           []string
@@ -161,7 +236,7 @@ func buildReviewLanes(queue []ReviewQueue) []ReviewLane {
 
 	out := make([]ReviewLane, 0, len(lanes))
 	for lane, acc := range lanes {
-		files := dedupeSorted(acc.files)
+		files := dedupePreserveOrder(acc.files)
 		why := dedupeSorted(acc.why)
 		omitted := ""
 		if total := len(files); total > 12 {
@@ -173,10 +248,11 @@ func buildReviewLanes(queue []ReviewQueue) []ReviewLane {
 		if gates == nil {
 			gates = []string{}
 		}
-		verify := plan.verify
+		verify := reviewLaneDefaultVerify(repo, lane, plan.verify)
 		if verify == nil {
 			verify = []string{}
 		}
+		verify = reviewLaneVerifyCommands(verify, files, rowByPath)
 		out = append(out, ReviewLane{
 			ID:            "slither:review:" + slug(lane),
 			Lane:          lane,
@@ -199,6 +275,69 @@ func buildReviewLanes(queue []ReviewQueue) []ReviewLane {
 		return strings.Compare(a.Lane, b.Lane)
 	})
 	return out
+}
+
+func reviewLaneVerifyCommands(base []string, files []string, rowByPath map[string]FileEvidence) []string {
+	out := append([]string{}, base...)
+	for _, file := range files {
+		row := rowByPath[file]
+		if row.VerifyCmd == "" {
+			continue
+		}
+		out = appendUnique(out, row.VerifyCmd)
+	}
+	return out
+}
+
+func reviewLaneDefaultVerify(repo, lane string, defaults []string) []string {
+	if repo == "" {
+		return defaults
+	}
+	profile := verificationProfileForRepo(repo)
+	if profile == "" || profile == "go" {
+		return defaults
+	}
+	out := make([]string, 0, len(defaults))
+	for _, cmd := range defaults {
+		out = appendUnique(out, translateGenericVerifyCmd(repo, profile, cmd))
+	}
+	return out
+}
+
+func translateGenericVerifyCmd(repo, profile, cmd string) string {
+	switch profile {
+	case "php":
+		switch cmd {
+		case "go test ./...", "go test -race ./...":
+			if composerHasScript(repo, "test") {
+				return "composer test"
+			}
+			if repoFileExists(repo, "phpunit.xml") {
+				return "vendor/bin/phpunit"
+			}
+			return "composer validate --strict"
+		case "go build ./...":
+			if packageHasScript(repo, "build") {
+				return "npm run build"
+			}
+			return "composer validate --strict"
+		case "go vet ./...", "go list -m all":
+			return "composer validate --strict"
+		default:
+			return cmd
+		}
+	case "node":
+		switch cmd {
+		case "go test ./...", "go test -race ./...", "go build ./...", "go vet ./...", "go list -m all":
+			if packageHasScript(repo, "test") {
+				return "npm test"
+			}
+			if packageHasScript(repo, "build") {
+				return "npm run build"
+			}
+		}
+	}
+	return cmd
 }
 
 func evidenceClassForRow(row FileEvidence) string {
@@ -246,7 +385,7 @@ func caveatForRow(row FileEvidence) string {
 	if stringSliceContains(row.EvidenceLayers, "model-error") {
 		return "model scoring failed; deterministic fallback evidence retained"
 	}
-	if needsMoreEvidence(row) {
+	if needsMoreEvidence(row) && !keepForPremium(row) {
 		return "single-lane or lexical evidence needs corroboration before high-cost review"
 	}
 	if stringSliceContains(row.EvidenceLayers, "low-signal") {
@@ -261,7 +400,15 @@ func verifyCmdForPath(path string) string {
 
 func verifyCmdForPathInRepo(repo, path string) string {
 	rel := filepath.ToSlash(path)
+	if cmd := commandDocsVerifyCmd(repo, rel); cmd != "" {
+		return cmd
+	}
+	if cmd := phpVerifyCmd(repo, rel); cmd != "" {
+		return cmd
+	}
 	switch {
+	case isEnvExamplePath(rel):
+		return translateGenericVerifyCmd(repo, verificationProfileForRepo(repo), "go test ./...")
 	case rel == "go.mod" || rel == "go.sum":
 		return "go list -m all"
 	case strings.HasSuffix(rel, ".go"):
@@ -271,14 +418,54 @@ func verifyCmdForPathInRepo(repo, path string) string {
 		}
 		return "go test ./" + dir + "/..."
 	case strings.HasPrefix(rel, "docs/") || strings.EqualFold(filepath.Base(rel), "README.md"):
-		return "go test ./..."
+		return translateGenericVerifyCmd(repo, verificationProfileForRepo(repo), "go test ./...")
 	case strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/"):
 		return "go test ./..."
+	case strings.HasSuffix(strings.ToLower(rel), ".sql"):
+		return "psql \"$TEST_DATABASE_URL\" -v ON_ERROR_STOP=1 -f " + rel
 	case isJavaScriptSourcePath(rel):
-		return packageVerifyCmd(repo, rel)
+		return jsVerifyCmd(repo, rel)
+	case rel == "package.json" || rel == "package-lock.json":
+		if packageHasScript(repo, "build") {
+			return "npm run build"
+		}
 	default:
 		return ""
 	}
+	return ""
+}
+
+func isEnvExamplePath(rel string) bool {
+	name := strings.ToLower(filepath.Base(filepath.ToSlash(rel)))
+	return name == ".env" || strings.HasPrefix(name, ".env.") || strings.HasSuffix(name, ".env") || strings.Contains(name, "env.example")
+}
+
+func phpVerifyCmd(repo, rel string) string {
+	if rel == "composer.json" || rel == "composer.lock" {
+		if repoFileExists(repo, "composer.json") {
+			return "composer validate --strict"
+		}
+	}
+	if strings.HasSuffix(strings.ToLower(rel), ".php") {
+		return "php -l " + rel
+	}
+	return ""
+}
+
+func commandDocsVerifyCmd(repo, rel string) string {
+	if repo == "" {
+		return ""
+	}
+	if rel != "docs/commands.md" && !strings.Contains(rel, "docs_refresh_commands") {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(repo, "cmd", "mytree", "docs_refresh_commands.go")); err != nil {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(repo, "cmd", "mytree", "main.go")); err != nil {
+		return ""
+	}
+	return "go test ./cmd/mytree/... && go build -o mytree ./cmd/mytree && ./mytree docs refresh-commands --check"
 }
 
 func isJavaScriptSourcePath(path string) bool {
@@ -289,6 +476,69 @@ func isJavaScriptSourcePath(path string) bool {
 	default:
 		return false
 	}
+}
+
+func jsVerifyCmd(repo, rel string) string {
+	if cmd := packageVerifyCmd(repo, rel); cmd != "" {
+		return cmd
+	}
+	return "bun build --no-bundle --outfile /tmp/slither-bun-check.js " + rel
+}
+
+func verificationProfileForRepo(repo string) string {
+	switch {
+	case repoFileExists(repo, "composer.json"):
+		return "php"
+	case repoFileExists(repo, "go.mod"):
+		return "go"
+	case repoFileExists(repo, "package.json"):
+		return "node"
+	default:
+		return ""
+	}
+}
+
+func repoFileExists(repo, rel string) bool {
+	if repo == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(repo, rel))
+	return err == nil
+}
+
+func composerHasScript(repo, name string) bool {
+	if repo == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(repo, "composer.json"))
+	if err != nil {
+		return false
+	}
+	var composer struct {
+		Scripts map[string]any `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &composer); err != nil {
+		return false
+	}
+	_, ok := composer.Scripts[name]
+	return ok
+}
+
+func packageHasScript(repo, name string) bool {
+	if repo == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(repo, "package.json"))
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	return pkg.Scripts[name] != ""
 }
 
 func packageVerifyCmd(repo, rel string) string {
@@ -375,20 +625,27 @@ func isUserSurfaceRow(row FileEvidence) bool {
 }
 
 func isDataIntegrityRow(row FileEvidence) bool {
+	lower := strings.ToLower(filepath.ToSlash(row.Path))
 	return row.MigrationSafetyRisk > 0 ||
 		row.StaleMarkerRisk > 0 ||
 		row.EnvContractRisk > 0 ||
-		stringSliceContains(row.EvidenceLayers, "churn") ||
-		stringSliceContains(row.EvidenceLayers, "bugfix-history")
+		strings.Contains(lower, "database") ||
+		strings.Contains(lower, "repository") ||
+		strings.Contains(lower, "migration") ||
+		strings.Contains(lower, "storage") ||
+		strings.Contains(lower, "cache")
 }
 
 func isAPIContractRow(row FileEvidence) bool {
+	lower := strings.ToLower(filepath.ToSlash(row.Path))
 	return row.OpenAPIContractRisk > 0 ||
 		row.CORSSecurityRisk > 0 ||
 		row.CookieSecurityRisk > 0 ||
 		row.SDKDXRisk > 0 ||
-		strings.Contains(strings.ToLower(row.Path), "schema") ||
-		strings.Contains(strings.ToLower(row.Path), "types.")
+		strings.Contains(lower, "openapi") ||
+		strings.Contains(lower, "swagger") ||
+		((strings.Contains(lower, "/api/") || strings.Contains(lower, "/web/") || strings.Contains(lower, "handler")) &&
+			(strings.Contains(lower, "schema") || strings.Contains(lower, "types.")))
 }
 
 func isErrorHandlingRow(row FileEvidence) bool {
@@ -464,6 +721,19 @@ func appendUnique(items []string, item string) []string {
 		}
 	}
 	return append(items, item)
+}
+
+func dedupePreserveOrder(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 func stringSliceContains(items []string, want string) bool {

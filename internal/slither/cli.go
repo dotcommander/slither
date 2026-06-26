@@ -18,7 +18,6 @@ const (
 	defaultDays      = 90
 	defaultBaseURL   = "https://openrouter.ai/api/v1"
 	defaultAPIKeyEnv = "OPENROUTER_API_KEY"
-	defaultModel     = "deepseek/deepseek-v4-pro"
 	localModel       = "Qwen3.6-35B-A3B-oQ4-fp16-mtp"
 	localBaseURL     = "http://127.0.0.1:8000/v1"
 	localAPIKeyEnv   = "SLITHER_API_KEY"
@@ -51,9 +50,9 @@ Usage:
 
 Model scoring:
   Slither uses github.com/garyblankenship/wormhole for model calls, matching distill.
-  If --model is omitted, slither scores with %s via OpenRouter.
+  If --model is omitted, slither uses deterministic fallback scoring.
   --local selects %s at %s unless overridden.
-`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, defaultBaseURL, defaultModel, localModel, localBaseURL)
+`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, defaultBaseURL, localModel, localBaseURL)
 }
 
 func normalizeReportArgs(args []string) []string {
@@ -142,8 +141,6 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 		if opts.APIKeyEnv == defaultAPIKeyEnv {
 			opts.APIKeyEnv = localAPIKeyEnv
 		}
-	} else if opts.Model == "" {
-		opts.Model = defaultModel
 	}
 
 	repo, err := filepath.Abs(opts.Repo)

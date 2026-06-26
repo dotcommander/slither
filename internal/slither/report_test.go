@@ -67,6 +67,8 @@ func TestBuildReportIgnoresPlaceholderCredentialLiterals(t *testing.T) {
 
 func configure() map[string]any {
 	apiKey := "local-placeholder"
+	help := "api_key: \"your-api-key-here\""
+	_ = help
 	return map[string]any{"api_key": apiKey}
 }
 `)
@@ -106,6 +108,34 @@ func TestBuildReportIncludesUntrackedGitFiles(t *testing.T) {
 	}
 }
 
+func TestBuildReportSkipsDeletedTrackedGitFiles(t *testing.T) {
+	tmp := t.TempDir()
+	runGitForTest(t, tmp, "init")
+	writeFile(t, tmp, "deleted.go", "package p\n// TODO deleted\n")
+	writeFile(t, tmp, "auth.go", "package p\n// TODO fix token handling\nfunc f(){ panic(\"x\") }\n")
+	runGitForTest(t, tmp, "add", "deleted.go", "auth.go")
+	if err := os.Remove(filepath.Join(tmp, "deleted.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findRow(report, "auth.go") == nil {
+		t.Fatalf("missing existing tracked auth.go; rows=%#v skipped=%#v", report.Rows, report.SkippedSignals)
+	}
+	if findRow(report, "deleted.go") != nil {
+		t.Fatalf("deleted tracked file should not produce evidence; rows=%#v", report.Rows)
+	}
+	if !contains(report.SkippedSignals, "git_ls_files:missing_tracked:1") {
+		t.Fatalf("skipped signals = %#v, want missing_tracked signal", report.SkippedSignals)
+	}
+	if report.Discovery.CandidateFiles != 1 {
+		t.Fatalf("candidate files = %d, want only existing files counted", report.Discovery.CandidateFiles)
+	}
+}
+
 func TestInspectFileSkipsDirectoryCandidates(t *testing.T) {
 	tmp := t.TempDir()
 	if err := os.Mkdir(filepath.Join(tmp, "tests"), 0o755); err != nil {
@@ -122,12 +152,15 @@ func TestInspectFileSkipsDirectoryCandidates(t *testing.T) {
 }
 
 func TestRenderMarkdownIncludesSnakeIdentity(t *testing.T) {
-	report := Report{Repo: "/repo", FilesSeen: 1, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 2, SeedScore: 1.5, EvidenceClass: "heuristic", Confidence: "low", EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}, Reasons: []string{"path:auth", "env_contract:missing"}, Summary: "sample"}}}
+	report := Report{Repo: "/repo", FilesSeen: 1, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 3, SeedScore: 1.5, EvidenceClass: "heuristic", Confidence: "low", EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}, Reasons: []string{"path:auth", "env_contract:missing"}, Summary: "sample"}}}
 	md := RenderMarkdown(report)
 	for _, want := range []string{"# Slither Report", "snake through", "Discovery: source `git`", "Skipped signals", "## Executive Triage", "Confidence: high", "## Ranked Files", "## Detailed Signals", "seed_score", "env_contract_risk=3", "path-risk", "`a.go`"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}
+	}
+	if !strings.Contains(md, "Ranked production files: `1`; separated documentation rows: `0`; separated test/fixture rows: `0`; generated/support rows: `0`; detail-only weak rows: `0`; total reported rows: `1`") {
+		t.Fatalf("markdown missing production/separated row counts:\n%s", md)
 	}
 	if strings.Contains(md, "workflow_security_risk | migration_safety_risk") {
 		t.Fatalf("markdown still includes the old all-risk wide table:\n%s", md)
@@ -190,6 +223,17 @@ func TestRenderMarkdownCompactsReviewPlanFiles(t *testing.T) {
 	}
 	if strings.Contains(md, "a.go, b.go, c.go, d.go, e.go, f.go") {
 		t.Fatalf("review plan did not compact file list:\n%s", md)
+	}
+}
+
+func TestStartHerePrefersProductionRankedRows(t *testing.T) {
+	rows := []FileEvidence{
+		{Path: "internal/a_test.go", Score: 5, Confidence: "high", EvidenceLayers: []string{"content-risk", "flake-risk"}, Reasons: []string{"content:background_context:2"}},
+		{Path: "internal/a.go", Score: 5, Confidence: "high", EvidenceLayers: []string{"content-risk", "hotspot"}, Reasons: []string{"content:resource_lifecycle:1"}},
+	}
+	got := startHere(rows)
+	if !strings.Contains(got, "`internal/a.go`") {
+		t.Fatalf("startHere should prefer production-ranked rows over separated test rows: %s", got)
 	}
 }
 
@@ -291,7 +335,7 @@ func TestRenderMarkdownOmitsCulledRowsFromRankedFiles(t *testing.T) {
 	if strings.Contains(ranked, "internal/storage/store_copy.go") {
 		t.Fatalf("duplicate-surface row should be omitted from ranked files:\n%s", ranked)
 	}
-	if !strings.Contains(ranked, "Generated, test, docs, duplicate-surface, and needs-more-evidence rows are omitted here") {
+	if !strings.Contains(ranked, "Generated/support, documentation, test/fixture, duplicate-surface, needs-more-evidence, low-signal, and weak-score rows are omitted here") {
 		t.Fatalf("ranked section missing omission note:\n%s", ranked)
 	}
 	detailed := md[detailedStart:]
@@ -480,6 +524,10 @@ func TestBuildReportAddsEvidenceMetadataAndReviewPlan(t *testing.T) {
 import "os"
 
 func main() {
+	// TODO fix token handling before this command ships.
+	if os.Getenv("SECRET_TOKEN") == "" {
+		panic("missing token")
+	}
 	os.Exit(1)
 }
 `)
@@ -546,6 +594,19 @@ func TestBuildReportUsesNearestPackageScriptForJavaScriptVerification(t *testing
 	}
 }
 
+func TestCommandDocsVerificationUsesMytreeRegistryGate(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "cmd/mytree/main.go", "package main\nfunc main(){}\n")
+	writeFile(t, tmp, "cmd/mytree/docs_refresh_commands.go", "package main\n")
+
+	want := "go test ./cmd/mytree/... && go build -o mytree ./cmd/mytree && ./mytree docs refresh-commands --check"
+	for _, path := range []string{"cmd/mytree/docs_refresh_commands.go", "docs/commands.md"} {
+		if got := verifyCmdForPathInRepo(tmp, path); got != want {
+			t.Fatalf("verify command for %s = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestBuildReviewPlanExcludesSeparatedDocsAndHistoryOnlyTests(t *testing.T) {
 	_, plan := BuildReviewPlan([]FileEvidence{
 		{
@@ -576,16 +637,169 @@ func TestBuildReviewPlanExcludesSeparatedDocsAndHistoryOnlyTests(t *testing.T) {
 			EvidenceLayers: []string{"flake-risk", "churn"},
 			Reasons:        []string{"flake:nondeterministic_or_io:1"},
 		},
+		{
+			Path:           "config/cache.php",
+			Score:          2,
+			PathRisk:       6,
+			EvidenceLayers: []string{"path-risk"},
+			Reasons:        []string{"path:cache"},
+		},
+		{
+			Path:           "app/Services/SupermemoryClient.php",
+			Score:          3,
+			ContentRisk:    6,
+			EvidenceLayers: []string{"content-risk", "sdk-dx"},
+			Reasons:        []string{"content:reliability_policy_boundary:3"},
+		},
 	})
 
 	for _, lane := range plan {
-		if contains(lane.Files, "docs/archive/testing/removed_test.go.archive") || contains(lane.Files, "internal/service/history_test.go") {
-			t.Fatalf("review plan should not include separated docs or history-only tests: %#v", plan)
+		if contains(lane.Files, "docs/archive/testing/removed_test.go.archive") ||
+			contains(lane.Files, "internal/service/history_test.go") ||
+			contains(lane.Files, "config/cache.php") {
+			t.Fatalf("review plan should not include separated docs, history-only tests, or weak production rows: %#v", plan)
 		}
+	}
+	if !reviewPlanContainsFile(plan, "app/Services/SupermemoryClient.php") {
+		t.Fatalf("review plan should retain score-3 alternate production row: %#v", plan)
 	}
 	testLane := findReviewLane(plan, "test-risk")
 	if testLane.Lane == "" || !contains(testLane.Files, "internal/service/flaky_test.go") {
 		t.Fatalf("review plan should retain explicit test-risk row: %#v", plan)
+	}
+	for _, lane := range plan {
+		if lane.Lane != "test-risk" && contains(lane.Files, "internal/service/flaky_test.go") {
+			t.Fatalf("test-risk row should not pollute production review lane %q: %#v", lane.Lane, plan)
+		}
+	}
+}
+
+func TestReviewLaneRulesAvoidSchemaAndChurnFalsePositives(t *testing.T) {
+	migration := FileEvidence{
+		Path:                "migrations/001_initial_schema.sql",
+		Score:               5,
+		MigrationSafetyRisk: 6,
+		EvidenceLayers:      []string{"migration-safety", "size"},
+	}
+	if !isDataIntegrityRow(migration) {
+		t.Fatal("migration row should be data-integrity")
+	}
+	if isAPIContractRow(migration) {
+		t.Fatal("database schema migration should not be an API contract row")
+	}
+
+	churnedCommand := FileEvidence{
+		Path:           "cmd/create.go",
+		Score:          5,
+		Churn:          144,
+		EvidenceLayers: []string{"churn", "bugfix-history"},
+	}
+	if isDataIntegrityRow(churnedCommand) {
+		t.Fatal("plain churn or bugfix history should not make a CLI file data-integrity")
+	}
+}
+
+func TestCaveatDoesNotDowngradePremiumKeepRows(t *testing.T) {
+	row := FileEvidence{
+		Path:           "config/auth.php",
+		Score:          4,
+		PathRisk:       8,
+		ContentRisk:    8,
+		EvidenceLayers: []string{"path-risk", "content-risk"},
+	}
+	if !keepForPremium(row) || !needsMoreEvidence(row) {
+		t.Fatalf("fixture should exercise premium keep plus lexical evidence overlap")
+	}
+	if got := caveatForRow(row); got != "" {
+		t.Fatalf("premium keep row caveat = %q, want no needs-more-evidence caveat", got)
+	}
+}
+
+func TestBuildReviewPlanPreservesRankedFileOrderBeforeTruncation(t *testing.T) {
+	rows := []FileEvidence{
+		{Path: "migrations/001_initial_schema.sql", Score: 5, PathRisk: 9, MigrationSafetyRisk: 6, EvidenceLayers: []string{"path-risk", "migration-safety"}},
+	}
+	for i := 0; i < 14; i++ {
+		rows = append(rows, FileEvidence{
+			Path:                fmt.Sprintf("internal/database/alpha_%02d.go", i),
+			Score:               5,
+			PathRisk:            4,
+			MigrationSafetyRisk: 6,
+			EvidenceLayers:      []string{"path-risk", "migration-safety"},
+		})
+	}
+
+	_, plan := BuildReviewPlan(rows)
+	lane := findReviewLane(plan, "data-integrity")
+	if lane.Lane == "" {
+		t.Fatalf("missing data-integrity lane: %#v", plan)
+	}
+	if len(lane.Files) == 0 || lane.Files[0] != "migrations/001_initial_schema.sql" {
+		t.Fatalf("data-integrity files should preserve ranked order before truncation: %#v", lane.Files)
+	}
+	if len(lane.Files) != 12 {
+		t.Fatalf("data-integrity lane should still cap displayed files at 12: %#v", lane.Files)
+	}
+}
+
+func TestBuildReviewPlanCarriesDisplayedFileVerifyCommands(t *testing.T) {
+	sqlVerify := `psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_initial_schema.sql`
+	_, plan := BuildReviewPlan([]FileEvidence{{
+		Path:                "migrations/001_initial_schema.sql",
+		Score:               5,
+		MigrationSafetyRisk: 6,
+		EvidenceLayers:      []string{"migration-safety"},
+		VerifyCmd:           sqlVerify,
+	}})
+
+	lane := findReviewLane(plan, "data-integrity")
+	if lane.Lane == "" {
+		t.Fatalf("missing data-integrity lane: %#v", plan)
+	}
+	if !contains(lane.Verify, "go test ./...") || !contains(lane.Verify, sqlVerify) {
+		t.Fatalf("data-integrity lane should include generic and file-specific verify commands: %#v", lane.Verify)
+	}
+}
+
+func TestBuildReviewPlanUsesRepoNativeVerifyCommands(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "composer.json", `{"scripts":{"test":["@php artisan test"]}}`)
+	writeFile(t, tmp, "package.json", `{"scripts":{"build":"vite build"}}`)
+	writeFile(t, tmp, "phpunit.xml", `<phpunit/>`)
+
+	if got := verifyCmdForPathInRepo(tmp, ".env.example"); got != "composer test" {
+		t.Fatalf("env verify command = %q", got)
+	}
+	if got := verifyCmdForPathInRepo(tmp, "app/Services/SupermemoryClient.php"); got != "php -l app/Services/SupermemoryClient.php" {
+		t.Fatalf("php verify command = %q", got)
+	}
+	if got := verifyCmdForPathInRepo(tmp, "README.md"); got != "composer test" {
+		t.Fatalf("README verify command = %q", got)
+	}
+	if got := verifyCmdForPathInRepo(tmp, "composer.json"); got != "composer validate --strict" {
+		t.Fatalf("composer verify command = %q", got)
+	}
+	if got := verifyCmdForPathInRepo(tmp, "package-lock.json"); got != "npm run build" {
+		t.Fatalf("package verify command = %q", got)
+	}
+
+	_, plan := BuildReviewPlanForRepo(tmp, []FileEvidence{{
+		Path:           "app/Services/SupermemoryClient.php",
+		Score:          5,
+		ContentRisk:    6,
+		EvidenceLayers: []string{"content-risk", "sdk-dx"},
+		Reasons:        []string{"content:shell_boundary:1"},
+		VerifyCmd:      verifyCmdForPathInRepo(tmp, "app/Services/SupermemoryClient.php"),
+	}})
+	lane := findReviewLane(plan, "error-handling")
+	if lane.Lane == "" {
+		t.Fatalf("missing error-handling lane: %#v", plan)
+	}
+	if contains(lane.Verify, "go vet ./...") || contains(lane.Verify, "go test ./...") {
+		t.Fatalf("PHP repo lane should not carry Go verify commands: %#v", lane.Verify)
+	}
+	if !contains(lane.Verify, "composer validate --strict") || !contains(lane.Verify, "composer test") || !contains(lane.Verify, "php -l app/Services/SupermemoryClient.php") {
+		t.Fatalf("PHP repo lane verify commands = %#v", lane.Verify)
 	}
 }
 
@@ -659,6 +873,10 @@ func TestBuildCullLedgerDemotesGeneratedReportsAndHistoryOnlyTests(t *testing.T)
 	report := Report{Repo: "/repo", Rows: []FileEvidence{
 		{Path: "internal/actions/digest/digest.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}},
 		{Path: "docs/remote-eval-report.html", Score: 5, ContentRisk: 5, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "ownership", "size", "churn"}},
+		{Path: "data/me/research/tasks/web-cache-2026-02-26/lva-case-detail.html", Score: 5, ContentRisk: 5, EvidenceLayers: []string{"content-risk", "size"}},
+		{Path: "prototypes/examples/variant-01/index.html", Score: 5, ContentRisk: 5, EvidenceLayers: []string{"content-risk", "size"}},
+		{Path: "stubs/agent.stub", Score: 5, ContentRisk: 5, EvidenceLayers: []string{"content-risk"}},
+		{Path: "database/.gitignore", Score: 5, PathRisk: 5, EvidenceLayers: []string{"path-risk"}},
 		{Path: "docs/archive/testing/removed-tldr-command/tldr_command_test.go.archive", Score: 5, ContentRisk: 5, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "ownership", "size", "churn"}},
 		{Path: "internal/actions/digest/digest_test.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}},
 		{Path: "internal/actions/flaky_test.go", Score: 5, ContentRisk: 5, FlakeRisk: 6, EvidenceLayers: []string{"content-risk", "flake-risk", "churn"}},
@@ -669,8 +887,8 @@ func TestBuildCullLedgerDemotesGeneratedReportsAndHistoryOnlyTests(t *testing.T)
 	if ledger.KeptForPremium.Count != 1 {
 		t.Fatalf("kept count = %d, want only source row kept: %#v", ledger.KeptForPremium.Count, ledger)
 	}
-	if ledger.Generated.Count != 1 {
-		t.Fatalf("generated count = %d, want docs HTML generated bucket: %#v", ledger.Generated.Count, ledger)
+	if ledger.Generated.Count != 5 {
+		t.Fatalf("generated count = %d, want docs HTML, data cache, prototype, stub, and gitignore artifacts generated bucket: %#v", ledger.Generated.Count, ledger)
 	}
 	if ledger.Documentation.Count != 1 {
 		t.Fatalf("documentation count = %d, want docs archive bucket: %#v", ledger.Documentation.Count, ledger)
@@ -829,6 +1047,50 @@ func TestSortReportRowsPrioritizesScoreAndConfidenceBeforeSeedScore(t *testing.T
 	}
 }
 
+func TestSelectRowsForTopKeepsRequestedProductionRows(t *testing.T) {
+	rows := []FileEvidence{
+		{Path: "docs/archive/old_test.go.archive", Score: 5, ContentRisk: 20, EvidenceLayers: []string{"content-risk", "size"}},
+		{Path: "internal/a.go", Score: 5, ContentRisk: 20, EvidenceLayers: []string{"content-risk", "hotspot"}},
+		{Path: "internal/a_test.go", Score: 5, FlakeRisk: 6, EvidenceLayers: []string{"flake-risk", "churn"}},
+		{Path: "internal/b.go", Score: 5, ContentRisk: 18, EvidenceLayers: []string{"content-risk", "unknowns"}},
+		{Path: "internal/c.go", Score: 5, ContentRisk: 16, EvidenceLayers: []string{"content-risk", "churn"}},
+		{Path: "internal/d.go", Score: 5, ContentRisk: 14, EvidenceLayers: []string{"content-risk", "ownership"}},
+	}
+
+	selected := selectRowsForTop(rows, 3)
+	if got := len(rankedMarkdownRows(selected)); got != 3 {
+		t.Fatalf("ranked rows = %d, want requested production top count; selected=%#v", got, selected)
+	}
+	if !containsPath(selected, "docs/archive/old_test.go.archive") || !containsPath(selected, "internal/a_test.go") {
+		t.Fatalf("separated high-signal rows before cutoff should be retained: %#v", selected)
+	}
+	if containsPath(selected, "internal/d.go") {
+		t.Fatalf("production row beyond requested top should be omitted: %#v", selected)
+	}
+}
+
+func TestRankedMarkdownRowsExcludeLowSignalCompletenessRows(t *testing.T) {
+	rows := []FileEvidence{
+		{Path: "config/auth.php", Score: 4, PathRisk: 8, ContentRisk: 8, EvidenceLayers: []string{"path-risk", "content-risk"}},
+		{Path: "internal/a.go", Score: 3, ContentRisk: 6, EvidenceLayers: []string{"content-risk", "sdk-dx"}},
+		{Path: "config/cache.php", Score: 2, PathRisk: 6, EvidenceLayers: []string{"path-risk"}},
+		{Path: ".gitignore", Score: 1, EvidenceLayers: []string{"low-signal"}},
+		{Path: "artisan", Score: 1, EvidenceLayers: []string{"low-signal"}},
+	}
+	ranked := rankedMarkdownRows(rows)
+	if !containsPath(ranked, "config/auth.php") || !containsPath(ranked, "internal/a.go") {
+		t.Fatalf("ranked rows = %#v, want premium keep and score-3 alternate rows", ranked)
+	}
+	if containsPath(ranked, "config/cache.php") || containsPath(ranked, ".gitignore") || containsPath(ranked, "artisan") {
+		t.Fatalf("ranked rows should exclude weak score-2 and low-signal rows: %#v", ranked)
+	}
+
+	selected := selectRowsForTop(rows, 80)
+	if !containsPath(selected, ".gitignore") || !containsPath(selected, "artisan") {
+		t.Fatalf("low-signal rows should remain in reported evidence when ranked rows are below top: %#v", selected)
+	}
+}
+
 func TestSeedScoreDemotesGeneratedAndTestOnlyArtifacts(t *testing.T) {
 	source := FileEvidence{Path: "internal/actions/digest/digest.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}}
 	generated := source
@@ -845,6 +1107,12 @@ func TestSeedScoreDemotesGeneratedAndTestOnlyArtifacts(t *testing.T) {
 	}
 	if verifyCmdForPath("testdata/extraction/expected/chunk-006.json") != "go test ./..." {
 		t.Fatalf("testdata verify command = %q, want repo-level go test", verifyCmdForPath("testdata/extraction/expected/chunk-006.json"))
+	}
+	if got := verifyCmdForPath("migrations/001_initial_schema.sql"); got != `psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_initial_schema.sql` {
+		t.Fatalf("sql migration verify command = %q", got)
+	}
+	if got := verifyCmdForPath("data/scripts/gene_cache_fetch.ts"); got != "bun build --no-bundle --outfile /tmp/slither-bun-check.js data/scripts/gene_cache_fetch.ts" {
+		t.Fatalf("package-less TypeScript verify command = %q", got)
 	}
 }
 
@@ -868,6 +1136,15 @@ func findReviewLane(plan []ReviewLane, lane string) ReviewLane {
 		}
 	}
 	return ReviewLane{}
+}
+
+func reviewPlanContainsFile(plan []ReviewLane, path string) bool {
+	for _, lane := range plan {
+		if contains(lane.Files, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNormalizeReportArgsAllowsFlagsAfterRepo(t *testing.T) {
@@ -899,6 +1176,46 @@ func TestRunReportHelpReturnsNil(t *testing.T) {
 	}
 }
 
+func TestRunReportCompletionReportsRowsAndRankedFiles(t *testing.T) {
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "report.md")
+	writeFile(t, tmp, "internal/a.go", "package internal\n\nfunc A(){ panic(\"x\") }\n")
+
+	var stdout strings.Builder
+	err := Run(context.Background(), []string{"report", tmp, "--out", out, "--top", "1"}, &stdout, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "report rows") || !strings.Contains(got, "ranked files") {
+		t.Fatalf("completion output should distinguish report rows from ranked files: %q", got)
+	}
+}
+
+func TestRunReportDefaultsToDeterministicFallback(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "internal/a.go", "package internal\n\nfunc A(){ panic(\"x\") }\n")
+
+	var stdout strings.Builder
+	err := Run(context.Background(), []string{"report", tmp, "--json", "--out", "-"}, &stdout, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload reportEnvelope
+	if err := json.Unmarshal([]byte(stdout.String()), &payload); err != nil {
+		t.Fatalf("parse JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.Model != "" {
+		t.Fatalf("default report should not configure model scoring; model=%q", payload.Model)
+	}
+	if payload.BaseURL != "" {
+		t.Fatalf("default report should not emit an inactive model base URL; base_url=%q", payload.BaseURL)
+	}
+	if !contains(payload.SkippedSignals, "model_scoring:not_configured") {
+		t.Fatalf("skipped signals = %#v, want deterministic fallback signal", payload.SkippedSignals)
+	}
+}
+
 func TestDocsUseRuntimeDefaults(t *testing.T) {
 	docs := readTextFile(t, filepath.Join("..", "..", "docs", "usage.md"))
 	for _, want := range []string{
@@ -906,6 +1223,8 @@ func TestDocsUseRuntimeDefaults(t *testing.T) {
 		fmt.Sprintf("| `--max-bytes` | `%d` |", defaultMaxBytes),
 		fmt.Sprintf("| `--days` | `%d` |", defaultDays),
 		fmt.Sprintf("--top %d", defaultTop),
+		"TEST_DATABASE_URL",
+		"bun build --no-bundle",
 	} {
 		if !strings.Contains(docs, want) {
 			t.Fatalf("docs/usage.md missing %q", want)
@@ -1728,6 +2047,15 @@ func contains(items []string, want string) bool {
 func containsReasonPrefix(items []string, prefix string) bool {
 	for _, item := range items {
 		if strings.HasPrefix(item, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPath(rows []FileEvidence, path string) bool {
+	for _, row := range rows {
+		if row.Path == path {
 			return true
 		}
 	}

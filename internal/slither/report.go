@@ -35,7 +35,7 @@ func RenderMarkdown(report Report) string {
 	rankedRows := rankedMarkdownRows(report.Rows)
 	fmt.Fprintf(&b, "## Ranked Files\n\n")
 	if len(rankedRows) < len(report.Rows) {
-		fmt.Fprintf(&b, "Generated, test, docs, duplicate-surface, and needs-more-evidence rows are omitted here; separated rows appear below, and `--json` retains the full evidence set.\n\n")
+		fmt.Fprintf(&b, "Generated/support, documentation, test/fixture, duplicate-surface, needs-more-evidence, low-signal, and weak-score rows are omitted here; separated rows appear below, and `--json` retains all reported evidence rows.\n\n")
 	}
 	fmt.Fprintf(&b, "| rank | file | score | confidence | evidence | review command | top signals | note |\n")
 	fmt.Fprintf(&b, "| ---: | --- | ---: | --- | --- | --- | --- | --- |\n")
@@ -69,7 +69,13 @@ func rankedMarkdownRows(rows []FileEvidence) []FileEvidence {
 		surfaceKey := cullSurfaceKey(row)
 		_, isDuplicate := seenSurfaces[surfaceKey]
 		switch {
-		case isGeneratedOrReportPath(row.Path) || isDocumentationPath(row.Path) || isTestPath(row.Path) || isTestOnlyCull(row) || needsMoreEvidence(row):
+		case isGeneratedOrReportPath(row.Path) ||
+			isDocumentationPath(row.Path) ||
+			isTestPath(row.Path) ||
+			isTestOnlyCull(row) ||
+			(needsMoreEvidence(row) && !keepForPremium(row)) ||
+			stringSliceContains(row.EvidenceLayers, "low-signal") ||
+			(!keepForPremium(row) && row.Score < 3):
 			continue
 		case isDuplicate && row.Score < 4:
 			continue
@@ -138,8 +144,17 @@ func writeSeparatedRowsMarkdown(b *strings.Builder, title, intro string, rows []
 
 func writeExecutiveTriageMarkdown(b *strings.Builder, report Report) {
 	stats := summarizeRows(report.Rows)
+	rankedCount := len(rankedMarkdownRows(report.Rows))
+	documentationCount := countDocumentationRows(report.Rows)
+	testCount := countTestRows(report.Rows)
+	generatedCount := countGeneratedRows(report.Rows)
+	detailOnlyCount := len(report.Rows) - rankedCount - documentationCount - testCount - generatedCount
+	if detailOnlyCount < 0 {
+		detailOnlyCount = 0
+	}
 	fmt.Fprintf(b, "## Executive Triage\n\n")
 	fmt.Fprintf(b, "- Start with: %s\n", startHere(report.Rows))
+	fmt.Fprintf(b, "- Ranked production files: `%d`; separated documentation rows: `%d`; separated test/fixture rows: `%d`; generated/support rows: `%d`; detail-only weak rows: `%d`; total reported rows: `%d`\n", rankedCount, documentationCount, testCount, generatedCount, detailOnlyCount, len(report.Rows))
 	fmt.Fprintf(b, "- Confidence: high `%d`, medium `%d`, low `%d`; test-gap rows: `%d`\n", stats.HighConfidence, stats.MediumConfidence, stats.LowConfidence, stats.TestGaps)
 	fmt.Fprintf(b, "- History-backed rows: `%d`; import-graph-backed rows: `%d`; deterministic-only rows: `%d`\n", stats.HistoryBacked, stats.ImportGraphBacked, stats.HeuristicOnly)
 	if len(stats.TopLayers) > 0 {
@@ -149,6 +164,36 @@ func writeExecutiveTriageMarkdown(b *strings.Builder, report Report) {
 		fmt.Fprintf(b, "- Review lanes: `%s`\n", strings.Join(reviewLaneNames(report.ReviewPlan), "`, `"))
 	}
 	fmt.Fprintf(b, "\n")
+}
+
+func countDocumentationRows(rows []FileEvidence) int {
+	count := 0
+	for _, row := range rows {
+		if isDocumentationPath(row.Path) && !isTestPath(row.Path) && !isGeneratedOrReportPath(row.Path) {
+			count++
+		}
+	}
+	return count
+}
+
+func countTestRows(rows []FileEvidence) int {
+	count := 0
+	for _, row := range rows {
+		if isTestPath(row.Path) && !isGeneratedOrReportPath(row.Path) {
+			count++
+		}
+	}
+	return count
+}
+
+func countGeneratedRows(rows []FileEvidence) int {
+	count := 0
+	for _, row := range rows {
+		if isGeneratedOrReportPath(row.Path) {
+			count++
+		}
+	}
+	return count
 }
 
 type rowSummaryStats struct {
@@ -225,7 +270,11 @@ func startHere(rows []FileEvidence) string {
 	if len(rows) == 0 {
 		return "no reportable rows"
 	}
-	row := rows[0]
+	startRows := rankedMarkdownRows(rows)
+	if len(startRows) == 0 {
+		startRows = rows
+	}
+	row := startRows[0]
 	signals := compactList(topReasons(row, 3), 3)
 	if signals == "" {
 		signals = compactList(row.EvidenceLayers, 3)

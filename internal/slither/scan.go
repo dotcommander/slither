@@ -60,9 +60,20 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: opts.BaseURL, SkippedSignals: skippedSignals}
-	for _, evidence := range rows {
-		if scorer != nil {
+	baseURL := ""
+	if opts.Model != "" {
+		baseURL = opts.BaseURL
+	}
+	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, SkippedSignals: skippedSignals}
+	// Pre-rank deterministically and only spend model calls on the top band:
+	// rows ranked well below --top keep their deterministic score, so the
+	// reported set is preserved without paying to score files that get
+	// truncated away. The margin lets the model still promote near-cutoff rows.
+	sortReportRows(rows)
+	scoreLimit := modelScoreLimit(opts.Top, len(rows))
+	for i := range rows {
+		evidence := rows[i]
+		if scorer != nil && i < scoreLimit {
 			fallbackLayers := evidence.EvidenceLayers
 			scored, err := scorer.Score(ctx, evidence)
 			if err != nil {
@@ -77,12 +88,49 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		report.Rows = append(report.Rows, evidence)
 	}
 	sortReportRows(report.Rows)
-	if len(report.Rows) > opts.Top {
-		report.Rows = report.Rows[:opts.Top]
-	}
+	report.Rows = selectRowsForTop(report.Rows, opts.Top)
 	report.FilesScored = len(report.Rows)
-	report.FirstReadQueue, report.ReviewPlan = BuildReviewPlan(report.Rows)
+	report.FirstReadQueue, report.ReviewPlan = BuildReviewPlanForRepo(opts.Repo, report.Rows)
 	return report, nil
+}
+
+func selectRowsForTop(rows []FileEvidence, top int) []FileEvidence {
+	if top <= 0 || len(rows) <= top {
+		return rows
+	}
+	rankedRows := rankedMarkdownRows(rows)
+	if len(rankedRows) == 0 {
+		return rows[:top]
+	}
+	if len(rankedRows) < top {
+		return rows
+	}
+	cutoffPath := rankedRows[min(top, len(rankedRows))-1].Path
+	for i, row := range rows {
+		if row.Path == cutoffPath {
+			return rows[:i+1]
+		}
+	}
+	return rows[:top]
+}
+
+// modelScoreLimit bounds how many top deterministic-ranked rows receive a model
+// call. It extends past top by a margin (half of top, at least 25) so the model
+// can still promote rows near the cutoff; rows beyond the limit keep their
+// deterministic score. Returns n when top is unset or the margin covers all rows.
+func modelScoreLimit(top, n int) int {
+	if top <= 0 {
+		return n
+	}
+	margin := top / 2
+	if margin < 25 {
+		margin = 25
+	}
+	limit := top + margin
+	if limit >= n {
+		return n
+	}
+	return limit
 }
 
 func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int64, scoreCtx scoreContext) ([]FileEvidence, error) {
@@ -250,7 +298,10 @@ func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, 
 			if len(untracked) > 0 {
 				skippedSignals = append(skippedSignals, "git_ls_files:included_untracked:"+itoa(len(untracked)))
 			}
-			paths := appendGitFiles(repo, tracked, untracked)
+			paths, missing := appendGitFiles(repo, tracked, untracked)
+			if missing > 0 {
+				skippedSignals = append(skippedSignals, "git_ls_files:missing_tracked:"+itoa(missing))
+			}
 			discovery := DiscoveryStats{
 				Source:         "git",
 				GitTracked:     len(tracked),
@@ -304,9 +355,10 @@ func gitFiles(ctx context.Context, repo string, args ...string) ([]string, error
 	return paths, scanner.Err()
 }
 
-func appendGitFiles(repo string, groups ...[]string) []string {
+func appendGitFiles(repo string, groups ...[]string) ([]string, int) {
 	seen := map[string]bool{}
 	var paths []string
+	var missing int
 	for _, group := range groups {
 		for _, rel := range group {
 			path := filepath.Join(repo, rel)
@@ -314,10 +366,16 @@ func appendGitFiles(repo string, groups ...[]string) []string {
 				continue
 			}
 			seen[path] = true
+			if _, err := os.Stat(path); err != nil {
+				if os.IsNotExist(err) {
+					missing++
+					continue
+				}
+			}
 			paths = append(paths, path)
 		}
 	}
-	return paths
+	return paths, missing
 }
 
 func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (FileEvidence, bool, error) {

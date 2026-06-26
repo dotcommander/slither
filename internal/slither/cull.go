@@ -243,6 +243,12 @@ func isGeneratedOrReportPath(path string) bool {
 		strings.HasSuffix(lower, ".pb.go") ||
 		strings.HasSuffix(lower, ".min.js") ||
 		strings.HasSuffix(lower, ".bundle.js") ||
+		strings.HasSuffix(lower, ".gitignore") ||
+		strings.HasPrefix(lower, ".work/") ||
+		strings.HasPrefix(lower, "prototypes/") ||
+		strings.HasPrefix(lower, "stubs/") ||
+		strings.Contains(lower, "/web-cache-") ||
+		(strings.HasPrefix(lower, "data/") && strings.HasSuffix(lower, ".html") && strings.Contains(lower, "/cache")) ||
 		(strings.HasPrefix(lower, "docs/") && strings.HasSuffix(lower, ".html")) ||
 		(strings.HasPrefix(lower, "docs/") && strings.HasSuffix(lower, ".json")) ||
 		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "report")) ||
