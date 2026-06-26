@@ -18,6 +18,7 @@ const (
 	defaultDays      = 90
 	defaultBaseURL   = "https://openrouter.ai/api/v1"
 	defaultAPIKeyEnv = "OPENROUTER_API_KEY"
+	defaultModel     = "deepseek/deepseek-v4-pro"
 	localModel       = "Qwen3.6-35B-A3B-oQ4-fp16-mtp"
 	localBaseURL     = "http://127.0.0.1:8000/v1"
 	localAPIKeyEnv   = "SLITHER_API_KEY"
@@ -50,9 +51,9 @@ Usage:
 
 Model scoring:
   Slither uses github.com/garyblankenship/wormhole for model calls, matching distill.
-  If --model is omitted, slither writes a deterministic fallback report without LLM calls.
+  If --model is omitted, slither scores with %s via OpenRouter.
   --local selects %s at %s unless overridden.
-`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, defaultBaseURL, localModel, localBaseURL)
+`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, defaultBaseURL, defaultModel, localModel, localBaseURL)
 }
 
 func normalizeReportArgs(args []string) []string {
@@ -100,7 +101,7 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(io.Discard)
 	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, BaseURL: defaultBaseURL, APIKeyEnv: defaultAPIKeyEnv}
 	fs.StringVar(&opts.Out, "out", opts.Out, "Markdown report path, or - for stdout")
-	fs.IntVar(&opts.Top, "top", opts.Top, "maximum rows to include")
+	fs.IntVar(&opts.Top, "top", opts.Top, "ranked production files to include")
 	fs.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum bytes to inspect per file")
 	fs.IntVar(&opts.Days, "days", opts.Days, "history window in days for churn and bug-fix signals")
 	fs.StringVar(&opts.Patterns, "patterns", "", "JSON path/content pattern file")
@@ -141,6 +142,8 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 		if opts.APIKeyEnv == defaultAPIKeyEnv {
 			opts.APIKeyEnv = localAPIKeyEnv
 		}
+	} else if opts.Model == "" {
+		opts.Model = defaultModel
 	}
 
 	repo, err := filepath.Abs(opts.Repo)
@@ -181,6 +184,6 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 	if err := os.WriteFile(opts.Out, output, 0o644); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
-	fmt.Fprintf(stdout, "slither wrote %s with %d scored files\n", opts.Out, report.FilesScored)
+	fmt.Fprintf(stdout, "slither wrote %s with %d report rows and %d ranked files\n", opts.Out, report.FilesScored, len(rankedMarkdownRows(report.Rows)))
 	return nil
 }
