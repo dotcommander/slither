@@ -1,0 +1,14 @@
+# Compiled binary (built via: go build -o slither ./cmd/slither)
+/slither
+
+# Scratch, audits, specs
+/.work/
+
+# Generated reports
+slither-report.md
+*-report.md
+
+# Go
+*.test
+*.out
+vendor/
