@@ -16,6 +16,10 @@ This repository is a small Go CLI module named `private/slither`. The command en
 
 Use standard Go formatting and idioms. Keep exported behavior in `internal/slither` explicit and testable, with `context.Context` passed through I/O, model calls, and scans. Prefer small plain functions, early returns, and concrete structs over speculative interfaces. Use descriptive Go names such as `BuildReport`, `RenderMarkdown`, and `FileEvidence`; tests should name the behavior under test.
 
+## Loop & Recursion Review
+
+Treat loops and recursion as structural hotspots. When touching a loop, recursive function, walker, scanner, graph traversal, retry, or batch processor, check whether work is bounded, independent, cancellable, and deterministic after collection. Prefer bounded worker pools for independent file or item scans, preserve output order with a final sort when order matters, and run `go test -race` when concurrency or shared state changes. For recursion, check depth bounds, cycle detection, repeated work, and whether an iterative form is safer.
+
 ## Testing Guidelines
 
 Use Go's standard `testing` package. Add tests next to the code they exercise with names like `TestBuildReportFallbackScoresRiskyFiles`. Prefer temporary directories via `t.TempDir()` for filesystem behavior. When changing CLI argument handling, scoring, scan limits, or Markdown output, add or update focused tests and run at least `go test ./internal/slither`.

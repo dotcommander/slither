@@ -4,6 +4,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
 	"os"
 	"path/filepath"
@@ -120,7 +123,7 @@ var fallbackContentPatterns = []contentPattern{
 	pattern("archive_extract_surface", `\b(?:extractall\s*\(|tarfile\.open\s*\(|zipfile\.ZipFile\s*\(|new\s+AdmZip\s*\(|extract[-]zip|unzipper\.|archiver\.|archive[/]zip|tar\.x\s*\(|tar\.extract\s*\()`, 4, 5, "content-risk"),
 	pattern("hardcoded_private_key", `-----BEGIN [A-Z ]*PRIVATE KEY-----`, 5, 3, "secret-risk"),
 	pattern("provider_token_literal", `\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})`, 5, 5, "secret-risk"),
-	pattern("credential_assignment_literal", `(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\b\s*[:=]\s*["'][^"']{12,}["']`, 4, 5, "secret-risk"),
+	pattern("credential_assignment_literal", `(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\b\s*[:=]\s*["'](?!(?:local-)?placeholder["']|example["']|dummy["']|test["']|changeme["'])[^"']{12,}["']`, 4, 5, "secret-risk"),
 	pattern("background_context", `\bcontext\.Background\s*\(`, 2, 4, "unknowns"),
 	pattern("resource_lifecycle", `\b(Open|Connect|NewClient|NewRequest|http\.Client|sql\.Open)\s*\(`, 2, 4, "unknowns"),
 	pattern("read_all_or_global_growth", `\bio\.ReadAll\s*\(|append\s*\([^)]*\.\.\.\)`, 3, 5, "unknowns"),
@@ -331,9 +334,13 @@ func unknownsRisk(rel, text string) (int, []string) {
 		score += min(count*2, 6)
 		reasons = append(reasons, "unknowns:hardcoded_runtime_endpoint:"+itoa(count))
 	}
-	if regexp.MustCompile(`(?s)\bfor\b.*\bfor\b`).FindStringIndex(text) != nil {
+	if hasNestedLoop(text) {
 		score += 2
 		reasons = append(reasons, "unknowns:nested_loop_scale:1")
+	}
+	if hasRecursiveCall(rel, text) {
+		score += 3
+		reasons = append(reasons, "unknowns:recursive_control_flow:1")
 	}
 	if count := len(regexp.MustCompile(`\b(NewClient|sql\.Open|http\.Client|regexp\.MustCompile)\s*\(`).FindAllStringIndex(text, -1)); count > 0 {
 		score += min(count*3, 6)
@@ -344,6 +351,88 @@ func unknownsRisk(rel, text string) (int, []string) {
 		reasons = append(reasons, "unknowns:custom_infra:"+itoa(count))
 	}
 	return score, reasons
+}
+
+func hasNestedLoop(text string) bool {
+	loopBodyDepths := []int{}
+	depth := 0
+	for _, line := range strings.Split(text, "\n") {
+		for len(loopBodyDepths) > 0 && depth < loopBodyDepths[len(loopBodyDepths)-1] {
+			loopBodyDepths = loopBodyDepths[:len(loopBodyDepths)-1]
+		}
+		if regexp.MustCompile(`\bfor\b[^{]*\{`).FindStringIndex(line) != nil {
+			if len(loopBodyDepths) > 0 {
+				return true
+			}
+			loopBodyDepths = append(loopBodyDepths, depth+1)
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if depth < 0 {
+			depth = 0
+		}
+		for len(loopBodyDepths) > 0 && depth < loopBodyDepths[len(loopBodyDepths)-1] {
+			loopBodyDepths = loopBodyDepths[:len(loopBodyDepths)-1]
+		}
+	}
+	return false
+}
+
+func hasRecursiveCall(rel, text string) bool {
+	if strings.ToLower(filepathExt(rel)) != ".go" {
+		return false
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), rel, text, 0)
+	if err != nil {
+		return false
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		receiver := receiverName(fn)
+		found := false
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if found {
+				return false
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fun := call.Fun.(type) {
+			case *ast.Ident:
+				found = fun.Name == fn.Name.Name
+			case *ast.SelectorExpr:
+				found = receiver != "" && fun.Sel.Name == fn.Name.Name && directReceiverName(fun.X) == receiver
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func receiverName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 || len(fn.Recv.List[0].Names) == 0 {
+		return ""
+	}
+	return fn.Recv.List[0].Names[0].Name
+}
+
+func directReceiverName(expr ast.Expr) string {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.ParenExpr:
+		return directReceiverName(x.X)
+	case *ast.StarExpr:
+		return directReceiverName(x.X)
+	default:
+		return ""
+	}
 }
 
 func envVarsInCode(rel, text string) []string {
@@ -414,6 +503,9 @@ func centralityRisk(incomingRefs, pathScore, contentScore int) (int, []string) {
 
 func cochangeRisk(info cochangeInfo, churn, fixTouches, pathScore, contentScore, centralityScore int) (int, []string) {
 	if info.PartnerCount == 0 {
+		return 0, nil
+	}
+	if info.PartnerCount == 1 && info.MaxJaccard < 0.3 {
 		return 0, nil
 	}
 	riskContext := fixTouches > 0 || churn >= 120 || pathScore >= 3 || contentScore >= 6 || centralityScore > 0

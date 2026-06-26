@@ -361,13 +361,13 @@
     },
     {
       "id": "credential_assignment_literal",
-      "pattern": "(?i)\\b(?:api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\\b\\s*[:=]\\s*[\"'][^\"'\\n]{16,}[\"']",
+      "pattern": "(?i)\\b(?:api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\\b\\s*[:=]\\s*[\"'](?!(?:local-)?placeholder[\"']|example[\"']|dummy[\"']|test[\"']|changeme[\"'])[^\"'\\n]{16,}[\"']",
       "weight": 4,
       "max_matches": 5
     },
     {
       "id": "entrypoint_exit",
-      "pattern": "\\b(panic|throw|fatal|Fatalf|log\\.Fatal)\\s*\\(",
+      "pattern": "\\b(?:panic|throw)\\s*\\(|\\blog\\.Fatal(?:f|ln)?\\s*\\(",
       "weight": 2,
       "max_matches": 4
     },
@@ -411,12 +411,6 @@
       "id": "offset_pagination",
       "pattern": "(?i)\\bOFFSET\\s+\\d+\\b|\\.offset\\s*\\(",
       "weight": 2,
-      "max_matches": 4
-    },
-    {
-      "id": "unsafe_index_creation",
-      "pattern": "(?i)\\bCREATE\\s+INDEX\\s+(?!CONCURRENTLY\\b)",
-      "weight": 3,
       "max_matches": 4
     },
     {

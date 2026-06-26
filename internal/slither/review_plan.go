@@ -1,6 +1,8 @@
 package slither
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -60,12 +62,12 @@ var reviewLanePriority = map[string]int{
 	"architecture":          10,
 }
 
-func finalizeEvidenceMetadata(row *FileEvidence) {
+func finalizeEvidenceMetadata(repo string, row *FileEvidence) {
 	row.ID = "slither:file:" + slug(row.Path)
 	row.EvidenceClass = evidenceClassForRow(*row)
 	row.Confidence = confidenceForRow(*row)
 	row.Caveat = caveatForRow(*row)
-	row.VerifyCmd = verifyCmdForPath(row.Path)
+	row.VerifyCmd = verifyCmdForPathInRepo(repo, row.Path)
 	if row.Excerpt != "" && int64(len(row.Excerpt)) < row.Bytes {
 		row.OmittedReason = "excerpt truncated to report summary"
 	}
@@ -74,6 +76,9 @@ func finalizeEvidenceMetadata(row *FileEvidence) {
 func BuildReviewPlan(rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
 	grouped := map[string]*ReviewQueue{}
 	for _, row := range rows {
+		if !includeInReviewPlan(row) {
+			continue
+		}
 		for _, rule := range reviewLaneRules {
 			if !rule.match(row) {
 				continue
@@ -118,6 +123,16 @@ func BuildReviewPlan(rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
 	})
 
 	return queue, buildReviewLanes(queue)
+}
+
+func includeInReviewPlan(row FileEvidence) bool {
+	if isGeneratedOrReportPath(row.Path) || isDocumentationPath(row.Path) {
+		return false
+	}
+	if isTestPath(row.Path) {
+		return isTestRiskRow(row)
+	}
+	return true
 }
 
 func buildReviewLanes(queue []ReviewQueue) []ReviewLane {
@@ -241,6 +256,10 @@ func caveatForRow(row FileEvidence) string {
 }
 
 func verifyCmdForPath(path string) string {
+	return verifyCmdForPathInRepo("", path)
+}
+
+func verifyCmdForPathInRepo(repo, path string) string {
 	rel := filepath.ToSlash(path)
 	switch {
 	case rel == "go.mod" || rel == "go.sum":
@@ -255,9 +274,94 @@ func verifyCmdForPath(path string) string {
 		return "go test ./..."
 	case strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/"):
 		return "go test ./..."
+	case isJavaScriptSourcePath(rel):
+		return packageVerifyCmd(repo, rel)
 	default:
 		return ""
 	}
+}
+
+func isJavaScriptSourcePath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".js", ".jsx", ".ts", ".tsx", ".svelte":
+		return true
+	default:
+		return false
+	}
+}
+
+func packageVerifyCmd(repo, rel string) string {
+	if repo == "" {
+		return ""
+	}
+	pkgDir, scripts := nearestPackageScripts(repo, rel)
+	if pkgDir == "" {
+		return ""
+	}
+	script := preferredPackageScript(scripts)
+	if script == "" {
+		return ""
+	}
+	displayDir := filepath.ToSlash(pkgDir)
+	if displayDir == "." {
+		if packageUsesBun(filepath.Join(repo, pkgDir)) {
+			return "bun run " + script
+		}
+		return "npm run " + script
+	}
+	if packageUsesBun(filepath.Join(repo, pkgDir)) {
+		return "bun --cwd " + displayDir + " run " + script
+	}
+	return "npm --prefix " + displayDir + " run " + script
+}
+
+func nearestPackageScripts(repo, rel string) (string, map[string]string) {
+	dir := filepath.Dir(filepath.ToSlash(rel))
+	if dir == "." {
+		dir = ""
+	}
+	for {
+		pkgPath := filepath.Join(repo, filepath.FromSlash(dir), "package.json")
+		data, err := os.ReadFile(pkgPath)
+		if err == nil {
+			var pkg struct {
+				Scripts map[string]string `json:"scripts"`
+			}
+			if json.Unmarshal(data, &pkg) == nil && len(pkg.Scripts) > 0 {
+				if dir == "" {
+					return ".", pkg.Scripts
+				}
+				return dir, pkg.Scripts
+			}
+		}
+		if dir == "" || dir == "." {
+			return "", nil
+		}
+		dir = filepath.Dir(dir)
+		if dir == "." {
+			dir = ""
+		}
+	}
+}
+
+func preferredPackageScript(scripts map[string]string) string {
+	for _, name := range []string{"typecheck", "check", "test", "build"} {
+		if _, ok := scripts[name]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
+func packageUsesBun(absDir string) bool {
+	if _, err := os.Stat(filepath.Join(absDir, "bun.lock")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(absDir, "bun.lockb")); err == nil {
+		return true
+	}
+	return false
 }
 
 func isUserSurfaceRow(row FileEvidence) bool {

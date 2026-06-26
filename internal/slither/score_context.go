@@ -317,35 +317,54 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 func localImportCounts(repo string, files []string, maxBytes int64) map[string]int {
 	source := map[string]string{}
 	noExt := map[string]string{}
+	goPackageFiles := map[string][]string{}
 	for _, path := range files {
 		rel, ok := relPath(repo, path)
 		if !ok || shouldSkip(rel) {
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(rel))
-		if ext != ".py" && ext != ".js" && ext != ".jsx" && ext != ".ts" && ext != ".tsx" {
+		if ext != ".go" && ext != ".py" && ext != ".js" && ext != ".jsx" && ext != ".ts" && ext != ".tsx" {
 			continue
 		}
 		source[rel] = path
-		noExt[strings.TrimSuffix(rel, ext)] = rel
-		if filepath.Base(rel) == "index"+ext || filepath.Base(rel) == "__init__"+ext {
-			noExt[filepath.Dir(rel)] = rel
+		if ext == ".go" {
+			if !isTestFile(rel) {
+				dir := filepath.Dir(rel)
+				if dir == "." {
+					dir = ""
+				}
+				goPackageFiles[dir] = append(goPackageFiles[dir], rel)
+			}
+		} else {
+			noExt[strings.TrimSuffix(rel, ext)] = rel
+			if filepath.Base(rel) == "index"+ext || filepath.Base(rel) == "__init__"+ext {
+				noExt[filepath.Dir(rel)] = rel
+			}
 		}
 	}
 	counts := map[string]int{}
 	for rel := range source {
 		counts[rel] = 0
 	}
+	modulePath := goModulePath(repo)
 	for importer, path := range source {
 		text, ok, _ := readTextPrefix(path, maxBytes)
 		if !ok {
 			continue
 		}
 		resolved := map[string]bool{}
-		for _, match := range regexp.MustCompile(`\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)|\brequire\s*\(\s*["']([^"']+)["']\s*\)|(?m)^\s*import\s+["']([^"']+)["']`).FindAllStringSubmatch(text, -1) {
+		for _, match := range regexp.MustCompile(`\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)|\brequire\s*\(\s*["']([^"']+)["']\s*\)|(?m)^\s*import\s+["']([^"']+)["']|(?m)^\s*import\s+(?:\w+\s+|[._]\s+)?["']([^"']+)["']`).FindAllStringSubmatch(text, -1) {
 			spec := firstNonEmpty(match[1:])
 			if target := resolveLocalImport(importer, spec, counts, noExt); target != "" && target != importer {
 				resolved[target] = true
+			}
+		}
+		for _, spec := range goImportSpecs(text) {
+			for _, target := range resolveGoImportPackage(importer, spec, modulePath, goPackageFiles) {
+				if target != importer {
+					resolved[target] = true
+				}
 			}
 		}
 		for target := range resolved {
@@ -353,6 +372,107 @@ func localImportCounts(repo string, files []string, maxBytes int64) map[string]i
 		}
 	}
 	return counts
+}
+
+func goModulePath(repo string) string {
+	data, err := os.ReadFile(filepath.Join(repo, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "module" {
+			return strings.Trim(fields[1], `"`)
+		}
+	}
+	return ""
+}
+
+func goImportSpecs(text string) []string {
+	matches := regexp.MustCompile(`(?m)^\s*import\s+(?:\w+\s+|[._]\s+)?["']([^"']+)["']|(?ms)^\s*import\s*\((.*?)\)`).FindAllStringSubmatch(text, -1)
+	seen := map[string]bool{}
+	var specs []string
+	for _, match := range matches {
+		if match[1] != "" {
+			if !seen[match[1]] {
+				seen[match[1]] = true
+				specs = append(specs, match[1])
+			}
+			continue
+		}
+		for _, lineMatch := range regexp.MustCompile(`(?:^|\n)\s*(?:\w+\s+|[._]\s+)?["']([^"']+)["']`).FindAllStringSubmatch(match[2], -1) {
+			spec := lineMatch[1]
+			if !seen[spec] {
+				seen[spec] = true
+				specs = append(specs, spec)
+			}
+		}
+	}
+	return specs
+}
+
+func resolveGoImportPackage(importer, spec, modulePath string, goPackageFiles map[string][]string) []string {
+	if modulePath == "" {
+		return nil
+	}
+	if spec == modulePath {
+		return goPackageFiles[""]
+	}
+	prefix := modulePath + "/"
+	if !strings.HasPrefix(spec, prefix) {
+		return nil
+	}
+	dir := strings.TrimPrefix(spec, prefix)
+	targets := goPackageFiles[dir]
+	if len(targets) == 0 {
+		return nil
+	}
+	importerDir := filepath.Dir(filepath.ToSlash(importer))
+	if importerDir == "." {
+		importerDir = ""
+	}
+	if importerDir == dir {
+		return nil
+	}
+	return goPackageOwnerFiles(dir, targets)
+}
+
+func goPackageOwnerFiles(dir string, files []string) []string {
+	if len(files) <= 1 {
+		return files
+	}
+	base := filepath.Base(dir)
+	singular := strings.TrimSuffix(base, "s")
+	preferredNames := []string{
+		base + ".go",
+		singular + ".go",
+		"types.go",
+		"interfaces.go",
+		"interface.go",
+		"client.go",
+		"server.go",
+		"handlers.go",
+		"handler.go",
+		"config.go",
+	}
+	byName := map[string]string{}
+	for _, rel := range files {
+		byName[filepath.Base(rel)] = rel
+	}
+	var owners []string
+	for _, name := range preferredNames {
+		if rel := byName[name]; rel != "" {
+			owners = append(owners, rel)
+		}
+		if len(owners) == 2 {
+			return owners
+		}
+	}
+	if len(owners) > 0 {
+		return owners
+	}
+	sort.Strings(files)
+	return files[:1]
 }
 
 func resolveLocalImport(importer, spec string, counts map[string]int, noExt map[string]string) string {

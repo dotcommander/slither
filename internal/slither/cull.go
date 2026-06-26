@@ -31,6 +31,7 @@ func BuildCullLedger(report Report) CullLedger {
 		KeptForPremium: CullBucket{Examples: []CullEntry{}},
 		Alternates:     CullBucket{Examples: []CullEntry{}},
 		Generated:      CullBucket{Examples: []CullEntry{}},
+		Documentation:  CullBucket{Examples: []CullEntry{}},
 		TestOnly:       CullBucket{Examples: []CullEntry{}},
 		LowSignal:      CullBucket{Examples: []CullEntry{}},
 		Duplicate:      CullBucket{Examples: []CullEntry{}},
@@ -46,9 +47,12 @@ func BuildCullLedger(report Report) CullLedger {
 		case isGeneratedOrReportPath(row.Path):
 			entry.Reason = "generated, report, minified, or derived artifact"
 			addCullEntry(&ledger.Generated, entry, 3)
-		case isTestOnlyCull(row):
-			entry.Reason = "test or fixture without release, reliability, or security evidence"
+		case isTestPath(row.Path):
+			entry.Reason = "test or fixture separated from the production premium queue"
 			addCullEntry(&ledger.TestOnly, entry, 3)
+		case isDocumentationPath(row.Path):
+			entry.Reason = "documentation or guide separated from the production premium queue"
+			addCullEntry(&ledger.Documentation, entry, 3)
 		case isDuplicate && row.Score < 4:
 			entry.Reason = "same evidence surface represented by stronger row " + duplicateOf
 			addCullEntry(&ledger.Duplicate, entry, 3)
@@ -250,11 +254,20 @@ func isGeneratedOrReportPath(path string) bool {
 }
 
 func isTestOnlyCull(row FileEvidence) bool {
-	lower := strings.ToLower(filepath.ToSlash(row.Path))
-	isTestPath := strings.Contains(lower, "/test/") ||
+	if !isTestPath(row.Path) {
+		return false
+	}
+	return row.FlakeRisk == 0 && row.OracleRisk == 0 && !rowHasHighRiskSignal(row)
+}
+
+func isTestPath(path string) bool {
+	lower := strings.ToLower(filepath.ToSlash(path))
+	return strings.Contains(lower, "/test/") ||
 		strings.Contains(lower, "/tests/") ||
 		strings.Contains(lower, "/fixtures/") ||
 		strings.Contains(lower, "/testdata/") ||
+		strings.Contains(lower, "testdata") ||
+		strings.Contains(lower, "fixture") ||
 		strings.HasPrefix(lower, "test/") ||
 		strings.HasPrefix(lower, "tests/") ||
 		strings.HasPrefix(lower, "fixtures/") ||
@@ -264,10 +277,6 @@ func isTestOnlyCull(row FileEvidence) bool {
 		strings.HasSuffix(lower, ".test.js") ||
 		strings.HasSuffix(lower, ".spec.ts") ||
 		strings.HasSuffix(lower, ".spec.js")
-	if !isTestPath {
-		return false
-	}
-	return row.FlakeRisk == 0 && row.OracleRisk == 0 && !rowHasHighRiskSignal(row)
 }
 
 func cullSurfaceKey(row FileEvidence) string {

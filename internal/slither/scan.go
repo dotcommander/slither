@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -22,6 +24,8 @@ var skipDirs = map[string]bool{
 
 var skipSuffixes = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".tar", ".mp4", ".mp3", ".lock", ".sum"}
 
+const maxInspectWorkers = 16
+
 type fallbackTerm struct {
 	Term   string
 	Weight int
@@ -29,6 +33,9 @@ type fallbackTerm struct {
 }
 
 func BuildReport(ctx context.Context, opts Options) (Report, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if opts.Days <= 0 {
 		opts.Days = 90
 	}
@@ -49,15 +56,12 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if scorer == nil {
 		skippedSignals = append(skippedSignals, "model_scoring:not_configured")
 	}
+	rows, err := inspectFiles(ctx, opts.Repo, paths, opts.MaxBytes, scoreCtx)
+	if err != nil {
+		return Report{}, err
+	}
 	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: opts.BaseURL, SkippedSignals: skippedSignals}
-	for _, path := range paths {
-		evidence, ok, err := inspectFile(opts.Repo, path, opts.MaxBytes, scoreCtx)
-		if err != nil {
-			return Report{}, err
-		}
-		if !ok {
-			continue
-		}
+	for _, evidence := range rows {
 		if scorer != nil {
 			fallbackLayers := evidence.EvidenceLayers
 			scored, err := scorer.Score(ctx, evidence)
@@ -69,24 +73,135 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 				evidence.EvidenceLayers = mergeLayers(fallbackLayers, []string{"model"})
 			}
 		}
-		finalizeEvidenceMetadata(&evidence)
+		finalizeEvidenceMetadata(opts.Repo, &evidence)
 		report.Rows = append(report.Rows, evidence)
 	}
-	sort.SliceStable(report.Rows, func(i, j int) bool {
-		if report.Rows[i].SeedScore != report.Rows[j].SeedScore {
-			return report.Rows[i].SeedScore > report.Rows[j].SeedScore
+	sortReportRows(report.Rows)
+	if len(report.Rows) > opts.Top {
+		report.Rows = report.Rows[:opts.Top]
+	}
+	report.FilesScored = len(report.Rows)
+	report.FirstReadQueue, report.ReviewPlan = BuildReviewPlan(report.Rows)
+	return report, nil
+}
+
+func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int64, scoreCtx scoreContext) ([]FileEvidence, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan string)
+	results := make(chan inspectResult, len(paths))
+	workers := inspectWorkerCount(len(paths))
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				evidence, ok, err := inspectFile(repo, path, maxBytes, scoreCtx)
+				if err != nil {
+					results <- inspectResult{err: err}
+					cancel()
+					return
+				}
+				if ok {
+					results <- inspectResult{evidence: evidence, ok: true}
+				}
+			}
+		}()
+	}
+
+	go func() {
+		defer close(jobs)
+		for _, path := range paths {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- path:
+			}
 		}
-		if report.Rows[i].FixTouches != report.Rows[j].FixTouches {
-			return report.Rows[i].FixTouches > report.Rows[j].FixTouches
+	}()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	rows := make([]FileEvidence, 0, len(paths))
+	var firstErr error
+	for result := range results {
+		if result.err != nil {
+			if firstErr == nil {
+				firstErr = result.err
+				cancel()
+			}
+			continue
 		}
-		if report.Rows[i].Churn != report.Rows[j].Churn {
-			return report.Rows[i].Churn > report.Rows[j].Churn
+		if result.ok {
+			rows = append(rows, result.evidence)
 		}
-		if report.Rows[i].TestGap != report.Rows[j].TestGap {
-			return report.Rows[i].TestGap
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+type inspectResult struct {
+	evidence FileEvidence
+	ok       bool
+	err      error
+}
+
+func inspectWorkerCount(pathCount int) int {
+	if pathCount <= 1 {
+		return 1
+	}
+	workers := runtime.GOMAXPROCS(0) * 2
+	if workers < 2 {
+		workers = 2
+	}
+	if workers > maxInspectWorkers {
+		workers = maxInspectWorkers
+	}
+	if workers > pathCount {
+		workers = pathCount
+	}
+	return workers
+}
+
+func sortReportRows(rows []FileEvidence) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Score != rows[j].Score {
+			return rows[i].Score > rows[j].Score
 		}
-		if len(report.Rows[i].EvidenceLayers) != len(report.Rows[j].EvidenceLayers) {
-			return len(report.Rows[i].EvidenceLayers) > len(report.Rows[j].EvidenceLayers)
+		if confidenceRank(effectiveConfidence(rows[i])) != confidenceRank(effectiveConfidence(rows[j])) {
+			return confidenceRank(effectiveConfidence(rows[i])) > confidenceRank(effectiveConfidence(rows[j]))
+		}
+		if rows[i].SeedScore != rows[j].SeedScore {
+			return rows[i].SeedScore > rows[j].SeedScore
+		}
+		if rows[i].FixTouches != rows[j].FixTouches {
+			return rows[i].FixTouches > rows[j].FixTouches
+		}
+		if rows[i].Churn != rows[j].Churn {
+			return rows[i].Churn > rows[j].Churn
+		}
+		if rows[i].TestGap != rows[j].TestGap {
+			return rows[i].TestGap
+		}
+		if len(rows[i].EvidenceLayers) != len(rows[j].EvidenceLayers) {
+			return len(rows[i].EvidenceLayers) > len(rows[j].EvidenceLayers)
 		}
 		for _, less := range []func(FileEvidence) int{
 			func(row FileEvidence) int { return row.PathRisk },
@@ -110,20 +225,14 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 			func(row FileEvidence) int { return row.StaleMarkerRisk },
 			func(row FileEvidence) int { return row.Lines },
 		} {
-			left := less(report.Rows[i])
-			right := less(report.Rows[j])
+			left := less(rows[i])
+			right := less(rows[j])
 			if left != right {
 				return left > right
 			}
 		}
-		return report.Rows[i].Path < report.Rows[j].Path
+		return rows[i].Path < rows[j].Path
 	})
-	if len(report.Rows) > opts.Top {
-		report.Rows = report.Rows[:opts.Top]
-	}
-	report.FilesScored = len(report.Rows)
-	report.FirstReadQueue, report.ReviewPlan = BuildReviewPlan(report.Rows)
-	return report, nil
 }
 
 func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, []string, error) {
@@ -222,6 +331,9 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	info, err := os.Stat(path)
 	if err != nil {
 		return FileEvidence{}, false, fmt.Errorf("stat %s: %w", rel, err)
+	}
+	if info.IsDir() {
+		return FileEvidence{}, false, nil
 	}
 	text, ok, err := readTextPrefix(path, maxBytes)
 	if err != nil || !ok {

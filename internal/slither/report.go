@@ -35,7 +35,7 @@ func RenderMarkdown(report Report) string {
 	rankedRows := rankedMarkdownRows(report.Rows)
 	fmt.Fprintf(&b, "## Ranked Files\n\n")
 	if len(rankedRows) < len(report.Rows) {
-		fmt.Fprintf(&b, "Culled generated, test-only, duplicate-surface, and needs-more-evidence rows are omitted here; use the cull ledger or `--json` for the full evidence set.\n\n")
+		fmt.Fprintf(&b, "Generated, test, docs, duplicate-surface, and needs-more-evidence rows are omitted here; separated rows appear below, and `--json` retains the full evidence set.\n\n")
 	}
 	fmt.Fprintf(&b, "| rank | file | score | confidence | evidence | review command | top signals | note |\n")
 	fmt.Fprintf(&b, "| ---: | --- | ---: | --- | --- | --- | --- | --- |\n")
@@ -53,6 +53,8 @@ func RenderMarkdown(report Report) string {
 			escapeCell(rowNote(row)),
 		)
 	}
+	writeSeparatedRowsMarkdown(&b, "Documentation Rows", "Documentation and guide files are separated from the production-ranked code queue.", documentationMarkdownRows(report.Rows))
+	writeSeparatedRowsMarkdown(&b, "Test Risk Rows", "Test and fixture files with reliability or oracle evidence are separated from the production-ranked queue.", testRiskMarkdownRows(report.Rows))
 	writeDetailedSignalsMarkdown(&b, report.Rows)
 	if len(report.ReviewPlan) > 0 {
 		writeReviewPlanMarkdown(&b, report.ReviewPlan)
@@ -67,7 +69,7 @@ func rankedMarkdownRows(rows []FileEvidence) []FileEvidence {
 		surfaceKey := cullSurfaceKey(row)
 		_, isDuplicate := seenSurfaces[surfaceKey]
 		switch {
-		case isGeneratedOrReportPath(row.Path) || isTestOnlyCull(row) || needsMoreEvidence(row):
+		case isGeneratedOrReportPath(row.Path) || isDocumentationPath(row.Path) || isTestPath(row.Path) || isTestOnlyCull(row) || needsMoreEvidence(row):
 			continue
 		case isDuplicate && row.Score < 4:
 			continue
@@ -78,6 +80,60 @@ func rankedMarkdownRows(rows []FileEvidence) []FileEvidence {
 		}
 	}
 	return rankedRows
+}
+
+func documentationMarkdownRows(rows []FileEvidence) []FileEvidence {
+	docRows := make([]FileEvidence, 0)
+	for _, row := range rows {
+		if isGeneratedOrReportPath(row.Path) || isTestPath(row.Path) || !isDocumentationPath(row.Path) {
+			continue
+		}
+		docRows = append(docRows, row)
+	}
+	return docRows
+}
+
+func testRiskMarkdownRows(rows []FileEvidence) []FileEvidence {
+	testRows := make([]FileEvidence, 0)
+	for _, row := range rows {
+		if isGeneratedOrReportPath(row.Path) || !isTestPath(row.Path) || isTestOnlyCull(row) {
+			continue
+		}
+		testRows = append(testRows, row)
+	}
+	return testRows
+}
+
+func isDocumentationPath(path string) bool {
+	lower := strings.ToLower(path)
+	return strings.HasPrefix(lower, "docs/") ||
+		strings.HasPrefix(lower, "doc/") ||
+		strings.HasSuffix(lower, ".md") ||
+		strings.HasSuffix(lower, ".mdx") ||
+		strings.HasSuffix(lower, ".rst")
+}
+
+func writeSeparatedRowsMarkdown(b *strings.Builder, title, intro string, rows []FileEvidence) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n## %s\n\n", title)
+	fmt.Fprintf(b, "%s\n\n", intro)
+	fmt.Fprintf(b, "| rank | file | score | confidence | evidence | review command | top signals |\n")
+	fmt.Fprintf(b, "| ---: | --- | ---: | --- | --- | --- | --- |\n")
+	for i, row := range rows {
+		fmt.Fprintf(
+			b,
+			"| %d | `%s` | %d | %s | %s | %s | %s |\n",
+			i+1,
+			row.Path,
+			row.Score,
+			cellOrDash(row.Confidence),
+			escapeCell(compactList(row.EvidenceLayers, 5)),
+			cellOrDash(row.VerifyCmd),
+			escapeCell(compactList(topReasons(row, 3), 3)),
+		)
+	}
 }
 
 func writeExecutiveTriageMarkdown(b *strings.Builder, report Report) {
@@ -246,10 +302,28 @@ func keyRiskFields(row FileEvidence) []string {
 }
 
 func topReasons(row FileEvidence, limit int) []string {
-	if len(row.Reasons) <= limit {
-		return row.Reasons
+	if len(row.Reasons) == 0 {
+		return nil
 	}
-	return row.Reasons[:limit]
+	reasons := append([]string(nil), row.Reasons...)
+	sort.SliceStable(reasons, func(i, j int) bool {
+		return markdownReasonPriority(reasons[i]) > markdownReasonPriority(reasons[j])
+	})
+	if len(reasons) <= limit {
+		return reasons
+	}
+	return reasons[:limit]
+}
+
+func markdownReasonPriority(reason string) int {
+	switch {
+	case strings.HasPrefix(reason, "content:go_bool_mode_flag_param:"):
+		return 0
+	case strings.HasPrefix(reason, "content:lint_suppression:"):
+		return 0
+	default:
+		return 1
+	}
 }
 
 func rowNote(row FileEvidence) string {
@@ -259,7 +333,11 @@ func rowNote(row FileEvidence) string {
 	if stringSliceContains(row.EvidenceLayers, "model") && row.Summary != "" {
 		return truncateCell(row.Summary, 120)
 	}
-	return "deterministic signals; inspect file"
+	intersection := strongestEvidenceIntersection(row)
+	if intersection != "" && intersection != "unknown" {
+		return "review " + intersection
+	}
+	return "review deterministic signal"
 }
 
 func RenderJSON(report Report) ([]byte, error) {
@@ -344,6 +422,7 @@ func writeCullLedgerMarkdown(b *strings.Builder, ledger CullLedger) {
 	writeCullBucketMarkdown(b, "kept_for_premium", ledger.KeptForPremium)
 	writeCullBucketMarkdown(b, "alternates", ledger.Alternates)
 	writeCullBucketMarkdown(b, "culled_generated_or_report", ledger.Generated)
+	writeCullBucketMarkdown(b, "culled_documentation", ledger.Documentation)
 	writeCullBucketMarkdown(b, "culled_test_only", ledger.TestOnly)
 	writeCullBucketMarkdown(b, "culled_low_signal", ledger.LowSignal)
 	writeCullBucketMarkdown(b, "culled_duplicate_surface", ledger.Duplicate)

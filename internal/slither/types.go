@@ -98,6 +98,7 @@ type CullLedger struct {
 	KeptForPremium CullBucket    `json:"kept_for_premium"`
 	Alternates     CullBucket    `json:"alternates"`
 	Generated      CullBucket    `json:"culled_generated_or_report"`
+	Documentation  CullBucket    `json:"culled_documentation"`
 	TestOnly       CullBucket    `json:"culled_test_only"`
 	LowSignal      CullBucket    `json:"culled_low_signal"`
 	Duplicate      CullBucket    `json:"culled_duplicate_surface"`
