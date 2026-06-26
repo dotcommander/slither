@@ -41,6 +41,26 @@ func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
 	}
 }
 
+func TestBuildReportClassifiesContentSecretsAsSecretRisk(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "main.go", "package main\n\nconst token = \"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
+
+	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := findRow(report, "main.go")
+	if row == nil {
+		t.Fatal("missing main.go")
+	}
+	if !contains(row.Reasons, "content:provider_token_literal:1") {
+		t.Fatalf("reasons = %#v, want provider token detector", row.Reasons)
+	}
+	if !contains(row.EvidenceLayers, "secret-risk") {
+		t.Fatalf("layers = %#v, want secret-risk", row.EvidenceLayers)
+	}
+}
+
 func TestBuildReportIncludesUntrackedGitFiles(t *testing.T) {
 	tmp := t.TempDir()
 	runGitForTest(t, tmp, "init")
@@ -669,6 +689,17 @@ func TestBuildReportPopulatesGitHistoryLanes(t *testing.T) {
 		if !contains(row.EvidenceLayers, layer) {
 			t.Fatalf("layers = %#v, want %s", row.EvidenceLayers, layer)
 		}
+	}
+}
+
+func TestRunGitHonorsCanceledContext(t *testing.T) {
+	tmp := t.TempDir()
+	runGitForTest(t, tmp, "init")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if out := runGit(ctx, tmp, "status", "--short"); out != "" {
+		t.Fatalf("runGit output = %q, want empty output after cancellation", out)
 	}
 }
 

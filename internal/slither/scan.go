@@ -40,7 +40,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	scoreCtx := newScoreContext(opts.Repo, paths, opts.MaxBytes, opts.Days, patterns)
+	scoreCtx := newScoreContext(ctx, opts.Repo, paths, opts.MaxBytes, opts.Days, patterns)
 	skippedSignals = append(skippedSignals, scoreCtx.skipped...)
 	scorer, err := NewModelScorer(opts)
 	if err != nil {
@@ -371,6 +371,10 @@ func evidenceLayersForReasons(reasons []string) []string {
 		switch {
 		case strings.HasPrefix(reason, "path:"):
 			layers = appendLayer(layers, "path-risk")
+		case strings.HasPrefix(reason, "content:hardcoded_private_key") ||
+			strings.HasPrefix(reason, "content:provider_token_literal") ||
+			strings.HasPrefix(reason, "content:credential_assignment_literal"):
+			layers = appendLayer(layers, "secret-risk")
 		case strings.HasPrefix(reason, "content:"):
 			layers = appendLayer(layers, "content-risk")
 		case strings.HasPrefix(reason, "size:"):
@@ -423,10 +427,6 @@ func evidenceLayersForReasons(reasons []string) []string {
 			layers = appendLayer(layers, "stale-marker")
 		case strings.HasPrefix(reason, "test_gap:"):
 			layers = appendLayer(layers, "test-void")
-		case strings.HasPrefix(reason, "content:hardcoded_private_key") ||
-			strings.HasPrefix(reason, "content:provider_token_literal") ||
-			strings.HasPrefix(reason, "content:credential_assignment_literal"):
-			layers = appendLayer(layers, "secret-risk")
 		case strings.HasPrefix(reason, "model_error:"):
 			layers = appendLayer(layers, "model-error")
 		case reason == "low-signal":

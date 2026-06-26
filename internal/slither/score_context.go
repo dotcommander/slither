@@ -1,6 +1,7 @@
 package slither
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,36 +25,36 @@ type scoreContext struct {
 	skipped       []string
 }
 
-func newScoreContext(repo string, files []string, maxBytes int64, days int, patterns scoringPatterns) scoreContext {
-	ctx := scoreContext{
+func newScoreContext(ctx context.Context, repo string, files []string, maxBytes int64, days int, patterns scoringPatterns) scoreContext {
+	scoreCtx := scoreContext{
 		files:         files,
-		churn:         churnByFile(repo, days),
+		churn:         churnByFile(ctx, repo, days),
 		fixTouches:    map[string]int{},
 		incomingRefs:  localImportCounts(repo, files, maxBytes),
 		documentedEnv: documentedEnvVars(repo, files, maxBytes),
 		patterns:      patterns,
 	}
-	fixTouches, skip := bugfixTouchesByFile(repo, days)
-	ctx.fixTouches = fixTouches
+	fixTouches, skip := bugfixTouchesByFile(ctx, repo, days)
+	scoreCtx.fixTouches = fixTouches
 	if skip != "" {
-		ctx.skipped = append(ctx.skipped, "bugfix_density:"+skip)
+		scoreCtx.skipped = append(scoreCtx.skipped, "bugfix_density:"+skip)
 	}
-	cochange, skip := cochangeByFile(repo, days)
-	ctx.cochange = cochange
+	cochange, skip := cochangeByFile(ctx, repo, days)
+	scoreCtx.cochange = cochange
 	if skip != "" {
-		ctx.skipped = append(ctx.skipped, "cochange:"+skip)
+		scoreCtx.skipped = append(scoreCtx.skipped, "cochange:"+skip)
 	}
-	ownership, skip := ownershipByFile(repo, days)
-	ctx.ownership = ownership
+	ownership, skip := ownershipByFile(ctx, repo, days)
+	scoreCtx.ownership = ownership
 	if skip != "" {
-		ctx.skipped = append(ctx.skipped, "ownership:"+skip)
+		scoreCtx.skipped = append(scoreCtx.skipped, "ownership:"+skip)
 	}
-	staleMarkers, skip := staleMarkersByFile(repo, files, maxBytes)
-	ctx.staleMarkers = staleMarkers
+	staleMarkers, skip := staleMarkersByFile(ctx, repo, files, maxBytes)
+	scoreCtx.staleMarkers = staleMarkers
 	if skip != "" {
-		ctx.skipped = append(ctx.skipped, "stale_markers:"+skip)
+		scoreCtx.skipped = append(scoreCtx.skipped, "stale_markers:"+skip)
 	}
-	return ctx
+	return scoreCtx
 }
 
 type cochangeInfo struct {
@@ -72,8 +73,8 @@ type staleMarkerInfo struct {
 	OldestDays int
 }
 
-func churnByFile(repo string, days int) map[string]int {
-	out := runGit(repo, "log", "--since="+itoa(days)+" days ago", "--numstat", "--format=")
+func churnByFile(ctx context.Context, repo string, days int) map[string]int {
+	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--numstat", "--format=")
 	if out == "" {
 		return map[string]int{}
 	}
@@ -93,8 +94,8 @@ func churnByFile(repo string, days int) map[string]int {
 	return churn
 }
 
-func bugfixTouchesByFile(repo string, days int) (map[string]int, string) {
-	history := runGit(repo, "log", "--since="+itoa(days)+" days ago", "--pretty=format:%H")
+func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
+	history := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--pretty=format:%H")
 	if history == "" {
 		return map[string]int{}, "no recent git history"
 	}
@@ -102,7 +103,7 @@ func bugfixTouchesByFile(repo string, days int) (map[string]int, string) {
 	if len(commits) < 30 {
 		return map[string]int{}, "insufficient commit count:" + itoa(len(commits))
 	}
-	out := runGit(repo, "log", "--since="+itoa(days)+" days ago", "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
+	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
 	if out == "" {
 		return map[string]int{}, ""
 	}
@@ -116,8 +117,8 @@ func bugfixTouchesByFile(repo string, days int) (map[string]int, string) {
 	return touches, ""
 }
 
-func ownershipByFile(repo string, days int) (map[string]ownershipInfo, string) {
-	out := runGit(repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_AUTHOR__%ae", "--name-only")
+func ownershipByFile(ctx context.Context, repo string, days int) (map[string]ownershipInfo, string) {
+	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_AUTHOR__%ae", "--name-only")
 	if out == "" {
 		return map[string]ownershipInfo{}, "no recent git history"
 	}
@@ -160,8 +161,8 @@ func ownershipByFile(repo string, days int) (map[string]ownershipInfo, string) {
 	return ownership, ""
 }
 
-func cochangeByFile(repo string, days int) (map[string]cochangeInfo, string) {
-	out := runGit(repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_COMMIT__", "--name-only")
+func cochangeByFile(ctx context.Context, repo string, days int) (map[string]cochangeInfo, string) {
+	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_COMMIT__", "--name-only")
 	if out == "" {
 		return map[string]cochangeInfo{}, "no recent git history"
 	}
@@ -249,7 +250,7 @@ func uniqueIncludedFiles(files []string) []string {
 	return unique
 }
 
-func staleMarkersByFile(repo string, files []string, maxBytes int64) (map[string]staleMarkerInfo, string) {
+func staleMarkersByFile(ctx context.Context, repo string, files []string, maxBytes int64) (map[string]staleMarkerInfo, string) {
 	markers := [][2]string{}
 	for _, path := range files {
 		if len(markers) >= 200 {
@@ -281,7 +282,7 @@ func staleMarkersByFile(repo string, files []string, maxBytes int64) (map[string
 	blameFailures := 0
 	for _, marker := range markers {
 		rel, line := marker[0], marker[1]
-		out := runGit(repo, "blame", "--line-porcelain", "-L", line+","+line, "--", rel)
+		out := runGit(ctx, repo, "blame", "--line-porcelain", "-L", line+","+line, "--", rel)
 		if out == "" {
 			blameFailures++
 			continue
@@ -412,8 +413,11 @@ func isEnvContractDocPath(rel string) bool {
 	return false
 }
 
-func runGit(repo string, args ...string) string {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+func runGit(ctx context.Context, repo string, args ...string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
