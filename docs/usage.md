@@ -90,11 +90,14 @@ unless you override each explicitly.
 
 ## Output
 
-Reports include discovery counts, evidence layers, lane scores, the pattern
-source, and skipped signals, so missing evidence is visible rather than treated
-as low risk. When writing to a file, the CLI prints `slither wrote <path> with <N>
-scored files` on success. With `--out -` the report streams to stdout and
-no success line is printed.
+The Markdown report has three sections: **Executive Triage** (confidence
+breakdown, review lanes, and a start-here pointer), **Ranked Files** (a compact
+table of the top files with confidence, evidence, review command, and key
+signals), and **Detailed Signals** (per-file seed score, class, churn, and risk
+fields). Discovery counts, the pattern source, and skipped signals are included
+so missing evidence is visible rather than treated as low risk. When writing to
+a file, the CLI prints `slither wrote <path> with <N> scored files` on success.
+With `--out -` the report streams to stdout and no success line is printed.
 
 ### JSON envelope (`--json`)
 
