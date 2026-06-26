@@ -662,6 +662,12 @@ func hotspotRisk(complexity, churn, fixTouches, incomingRefs int) (int, []string
 }
 
 func seedScore(row FileEvidence) float64 {
+	artifactPenalty := 0.0
+	if isGeneratedOrReportPath(row.Path) {
+		artifactPenalty = 1.25
+	} else if isTestOnlyCull(row) {
+		artifactPenalty = 0.75
+	}
 	sizeComponent := math.Min(float64(row.Lines)/300.0, 5)
 	churnComponent := math.Min(float64(row.Churn)/120.0, 5)
 	fixComponent := math.Min(float64(row.FixTouches), 5)
@@ -716,7 +722,7 @@ func seedScore(row FileEvidence) float64 {
 		0.10*sizeComponent +
 		0.05*markerComponent +
 		0.02*layerComponent
-	return math.Round(total*100) / 100
+	return math.Round(math.Max(total-artifactPenalty, 0)*100) / 100
 }
 
 func qualitativeScore(row FileEvidence) int {

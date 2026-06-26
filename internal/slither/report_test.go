@@ -165,6 +165,10 @@ func Load() string {
 	if !contains(cliLane.Gates, "help-text accuracy") || !contains(cliLane.Verify, "go build ./...") {
 		t.Fatalf("cli lane missing gates/verify: %#v", cliLane)
 	}
+	readme := findRow(report, "README.md")
+	if readme != nil && readme.VerifyCmd != "go test ./..." {
+		t.Fatalf("README verify command = %q, want repo-local go test", readme.VerifyCmd)
+	}
 }
 
 func TestRenderJSONIncludesCullLedger(t *testing.T) {
@@ -230,6 +234,66 @@ func TestBuildCullLedgerBucketsRows(t *testing.T) {
 		if bucket.Count > 0 && len(bucket.Examples) == 0 {
 			t.Fatalf("bucket missing examples: %#v", bucket)
 		}
+	}
+}
+
+func TestBuildCullLedgerDemotesGeneratedReportsAndHistoryOnlyTests(t *testing.T) {
+	report := Report{Repo: "/repo", Rows: []FileEvidence{
+		{Path: "internal/actions/digest/digest.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}},
+		{Path: "docs/remote-eval-report.html", Score: 5, ContentRisk: 5, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "ownership", "size", "churn"}},
+		{Path: "internal/actions/digest/digest_test.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}},
+		{Path: "testdata/extraction/expected/chunk-006.json", Score: 4, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"cochange", "ownership", "churn"}},
+	}}
+
+	ledger := BuildCullLedger(report)
+	if ledger.KeptForPremium.Count != 1 {
+		t.Fatalf("kept count = %d, want only source row kept: %#v", ledger.KeptForPremium.Count, ledger)
+	}
+	if ledger.Generated.Count != 1 {
+		t.Fatalf("generated count = %d, want docs HTML generated bucket: %#v", ledger.Generated.Count, ledger)
+	}
+	if ledger.TestOnly.Count != 2 {
+		t.Fatalf("test-only count = %d, want test and testdata rows demoted: %#v", ledger.TestOnly.Count, ledger)
+	}
+}
+
+func TestBuildCullLedgerCapsPremiumSeeds(t *testing.T) {
+	var rows []FileEvidence
+	for i := 0; i < maxPremiumCullSeeds+2; i++ {
+		rows = append(rows, FileEvidence{
+			Path:           fmt.Sprintf("internal/pkg/file_%02d.go", i),
+			Score:          5,
+			ContentRisk:    5,
+			UnknownsRisk:   3,
+			EvidenceLayers: []string{"content-risk", "unknowns", "hotspot"},
+		})
+	}
+
+	ledger := BuildCullLedger(Report{Repo: "/repo", Rows: rows})
+	if ledger.KeptForPremium.Count != maxPremiumCullSeeds {
+		t.Fatalf("kept count = %d, want cap %d", ledger.KeptForPremium.Count, maxPremiumCullSeeds)
+	}
+	if ledger.Alternates.Count != 2 {
+		t.Fatalf("alternates count = %d, want overflow rows", ledger.Alternates.Count)
+	}
+}
+
+func TestSeedScoreDemotesGeneratedAndTestOnlyArtifacts(t *testing.T) {
+	source := FileEvidence{Path: "internal/actions/digest/digest.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}}
+	generated := source
+	generated.Path = "docs/extraction-scoreboard.json"
+	testOnly := source
+	testOnly.Path = "internal/actions/digest/digest_test.go"
+
+	sourceScore := seedScore(source)
+	if generatedScore := seedScore(generated); generatedScore >= sourceScore {
+		t.Fatalf("generated score = %.2f, want below source score %.2f", generatedScore, sourceScore)
+	}
+	if testScore := seedScore(testOnly); testScore >= sourceScore {
+		t.Fatalf("test score = %.2f, want below source score %.2f", testScore, sourceScore)
+	}
+	if verifyCmdForPath("testdata/extraction/expected/chunk-006.json") != "go test ./..." {
+		t.Fatalf("testdata verify command = %q, want repo-level go test", verifyCmdForPath("testdata/extraction/expected/chunk-006.json"))
 	}
 }
 

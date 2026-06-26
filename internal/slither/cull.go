@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const maxPremiumCullSeeds = 24
+
 func BuildCullLedger(report Report) CullLedger {
 	firstReadQueue := report.FirstReadQueue
 	reviewPlan := report.ReviewPlan
@@ -29,6 +31,7 @@ func BuildCullLedger(report Report) CullLedger {
 		NeedsEvidence:  CullBucket{Examples: []CullEntry{}},
 	}
 	seenSurfaces := map[string]string{}
+	premiumSeeds := 0
 	for _, row := range report.Rows {
 		entry := cullEntry(row, "")
 		surfaceKey := cullSurfaceKey(row)
@@ -44,9 +47,16 @@ func BuildCullLedger(report Report) CullLedger {
 			entry.Reason = "same evidence surface represented by stronger row " + duplicateOf
 			addCullEntry(&ledger.Duplicate, entry, 3)
 		case keepForPremium(row):
-			entry.Reason = "strong multi-layer seed"
-			addCullEntry(&ledger.KeptForPremium, entry, 0)
-			seenSurfaces[surfaceKey] = row.Path
+			if premiumSeeds < maxPremiumCullSeeds {
+				entry.Reason = "strong multi-layer seed"
+				addCullEntry(&ledger.KeptForPremium, entry, 0)
+				premiumSeeds++
+				seenSurfaces[surfaceKey] = row.Path
+			} else {
+				entry.Reason = "strong seed beyond kept_for_premium cap"
+				addCullEntry(&ledger.Alternates, entry, 3)
+				seenSurfaces[surfaceKey] = row.Path
+			}
 		case needsMoreEvidence(row):
 			entry.Reason = "lexical or single-lane evidence needs corroboration"
 			addCullEntry(&ledger.NeedsEvidence, entry, 3)
@@ -148,8 +158,6 @@ func rowHasHighRiskSignal(row FileEvidence) bool {
 		row.CORSSecurityRisk > 0 ||
 		row.CookieSecurityRisk > 0 ||
 		row.DependencyHealthRisk > 0 ||
-		row.CochangeRisk > 0 ||
-		row.OwnershipRisk > 0 ||
 		row.FlakeRisk > 0 ||
 		row.OracleRisk > 0 ||
 		row.StaleMarkerRisk > 0
@@ -173,6 +181,11 @@ func isGeneratedOrReportPath(path string) bool {
 		strings.HasSuffix(lower, ".pb.go") ||
 		strings.HasSuffix(lower, ".min.js") ||
 		strings.HasSuffix(lower, ".bundle.js") ||
+		(strings.HasPrefix(lower, "docs/") && strings.HasSuffix(lower, ".html")) ||
+		(strings.HasPrefix(lower, "docs/") && strings.HasSuffix(lower, ".json")) ||
+		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "report")) ||
+		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "scoreboard")) ||
+		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "benchmark")) ||
 		strings.Contains(lower, "slither-report") ||
 		strings.Contains(lower, "triage-report") ||
 		strings.Contains(lower, "/reports/")
@@ -184,6 +197,10 @@ func isTestOnlyCull(row FileEvidence) bool {
 		strings.Contains(lower, "/tests/") ||
 		strings.Contains(lower, "/fixtures/") ||
 		strings.Contains(lower, "/testdata/") ||
+		strings.HasPrefix(lower, "test/") ||
+		strings.HasPrefix(lower, "tests/") ||
+		strings.HasPrefix(lower, "fixtures/") ||
+		strings.HasPrefix(lower, "testdata/") ||
 		strings.HasSuffix(lower, "_test.go") ||
 		strings.HasSuffix(lower, ".test.ts") ||
 		strings.HasSuffix(lower, ".test.js") ||

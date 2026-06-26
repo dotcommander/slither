@@ -237,7 +237,9 @@ func verifyCmdForPath(path string) string {
 		}
 		return "go test ./" + dir + "/..."
 	case strings.HasPrefix(rel, "docs/") || strings.EqualFold(filepath.Base(rel), "README.md"):
-		return "go test ./internal/slither"
+		return "go test ./..."
+	case strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/"):
+		return "go test ./..."
 	default:
 		return ""
 	}
