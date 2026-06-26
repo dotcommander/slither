@@ -71,19 +71,14 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	// truncated away. The margin lets the model still promote near-cutoff rows.
 	sortReportRows(rows)
 	scoreLimit := modelScoreLimit(opts.Top, len(rows))
+	if scorer != nil && scoreLimit > 0 {
+		// Score the top deterministic band concurrently in batches; results are
+		// written back in place, preserving order. Rows beyond scoreLimit keep
+		// their deterministic score.
+		scoreTopRows(ctx, scorer, rows[:scoreLimit], modelBatchSize, modelScoreConcurrency)
+	}
 	for i := range rows {
 		evidence := rows[i]
-		if scorer != nil && i < scoreLimit {
-			fallbackLayers := evidence.EvidenceLayers
-			scored, err := scorer.Score(ctx, evidence)
-			if err != nil {
-				evidence.Reasons = append(evidence.Reasons, "model_error:"+err.Error())
-				evidence.EvidenceLayers = evidenceLayersForReasons(evidence.Reasons)
-			} else {
-				evidence = scored
-				evidence.EvidenceLayers = mergeLayers(fallbackLayers, []string{"model"})
-			}
-		}
 		finalizeEvidenceMetadata(opts.Repo, &evidence)
 		report.Rows = append(report.Rows, evidence)
 	}

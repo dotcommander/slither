@@ -1242,13 +1242,13 @@ func TestDocsUseRuntimeDefaults(t *testing.T) {
 	}
 }
 
-func TestParseModelScoreExtractsJSON(t *testing.T) {
-	got, err := parseModelScore("sure\n{\"score\":4,\"summary\":\"hot\",\"reasons\":[\"auth\"]}")
+func TestParseModelScoresExtractsArray(t *testing.T) {
+	got, err := parseModelScores("sure\n[{\"index\":0,\"score\":4,\"summary\":\"hot\",\"reasons\":[\"auth\"]}]")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Score != 4 || got.Summary != "hot" || len(got.Reasons) != 1 {
-		t.Fatalf("unexpected score: %#v", got)
+	if len(got) != 1 || got[0].Index != 0 || got[0].Score != 4 || got[0].Summary != "hot" || len(got[0].Reasons) != 1 {
+		t.Fatalf("unexpected scores: %#v", got)
 	}
 }
 
