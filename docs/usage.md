@@ -90,14 +90,15 @@ unless you override each explicitly.
 
 ## Output
 
-The Markdown report has three sections: **Executive Triage** (confidence
-breakdown, review lanes, and a start-here pointer), **Ranked Files** (a compact
-table of the top files with confidence, evidence, review command, and key
-signals), and **Detailed Signals** (per-file seed score, class, churn, and risk
-fields). Discovery counts, the pattern source, and skipped signals are included
-so missing evidence is visible rather than treated as low risk. When writing to
-a file, the CLI prints `slither wrote <path> with <N> scored files` on success.
-With `--out -` the report streams to stdout and no success line is printed.
+The Markdown report leads with **Executive Triage** (confidence breakdown,
+review lanes, and a start-here pointer), then **Ranked Files** (a compact table
+of the top production files with confidence, evidence, review command, key
+signals, and a note), and finally **Detailed Signals** (per-file seed score,
+class, churn, and risk fields). Generated, documentation, and test/fixture
+files are omitted from the ranked queue and appear in separate **Documentation
+Rows** and **Test Risk Rows** sections when present; `--json` retains the full
+evidence set. Discovery counts, the pattern source, and skipped signals are
+included so missing evidence is visible rather than treated as low risk.
 
 ### JSON envelope (`--json`)
 
