@@ -1,4 +1,4 @@
-module private/slither
+module github.com/dotcommander/slither
 
 go 1.25
 

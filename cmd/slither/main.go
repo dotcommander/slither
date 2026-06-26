@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"private/slither/internal/slither"
+	"github.com/dotcommander/slither/internal/slither"
 )
 
 func main() {
