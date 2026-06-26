@@ -6,9 +6,18 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/garyblankenship/wormhole/pkg/types"
 	"github.com/garyblankenship/wormhole/pkg/wormhole"
+)
+
+const (
+	// modelMaxOutputTokens caps the scoring response; the expected JSON is tiny.
+	modelMaxOutputTokens = 256
+	// modelCallTimeout bounds a single model scoring call so one slow request
+	// cannot stall the whole scan.
+	modelCallTimeout = 90 * time.Second
 )
 
 type ModelScorer struct {
@@ -50,7 +59,9 @@ func providerForBaseURL(baseURL string) string {
 
 func (s *ModelScorer) Score(ctx context.Context, evidence FileEvidence) (FileEvidence, error) {
 	prompt := scoringPrompt(evidence)
-	resp, err := s.wh.Text().Model(s.model).Prompt(prompt).Temperature(0).Generate(ctx)
+	callCtx, cancel := context.WithTimeout(ctx, modelCallTimeout)
+	defer cancel()
+	resp, err := s.wh.Text().Model(s.model).Prompt(prompt).Temperature(0).MaxTokens(modelMaxOutputTokens).Generate(callCtx)
 	if err != nil {
 		return evidence, fmt.Errorf("wormhole score %s: %w", evidence.Path, err)
 	}
