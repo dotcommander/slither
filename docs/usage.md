@@ -3,9 +3,8 @@
 `slither` is a cheap-model repo scout. It walks a repository, gathers bounded
 per-file evidence, optionally scores files with a cheap LLM (via
 `github.com/garyblankenship/wormhole`), and writes a Markdown or JSON report.
-By default it scores with `deepseek/deepseek-v4-pro` via OpenRouter; when no API
-key is set or a model call fails, it keeps the deterministic fallback score per
-file (marked `model_error`), so the CLI still works offline.
+With no model configured it uses a deterministic fallback score, so the CLI is
+useful fully offline.
 
 ## Build
 
@@ -30,11 +29,11 @@ slither report [repo] [flags]
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--out` | `slither-report.md` | Output path; `-` writes to stdout. Switches to `slither-report.json` automatically when `--json` is set and `--out` is left at its default. |
-| `--top` | `80` | Ranked production files to include. High-signal docs, tests, and fixtures before the production cutoff are retained in separated sections. Must be positive. |
+| `--top` | `80` | Maximum rows to include in the report. Must be positive. |
 | `--max-bytes` | `500000` | Maximum bytes inspected per file. Must be positive. |
 | `--days` | `90` | History window (days) for churn and bug-fix signals. Must be positive. |
-| `--patterns` | (embedded) | Path to a JSON path/content pattern file. Overrides Slither's embedded deterministic catalog. |
-| `--model` | `deepseek/deepseek-v4-pro` | Cheap model ID for wormhole scoring (OpenRouter default). Pass another ID to override. |
+| `--patterns` | (embedded) | Path to a JSON path/content pattern file. Overrides the embedded `premium-model-triage` catalog. |
+| `--model` | (none) | Cheap model ID for wormhole scoring. Omit for deterministic fallback. |
 | `--base-url` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL. |
 | `--api-key-env` | `OPENROUTER_API_KEY` | Environment variable holding the API key. |
 | `--local` | `false` | Use the local model profile (see below). |
@@ -43,7 +42,7 @@ slither report [repo] [flags]
 
 ## Examples
 
-Default run (scores with `deepseek/deepseek-v4-pro` via OpenRouter; needs `OPENROUTER_API_KEY`, else falls back to deterministic per-file scoring):
+Deterministic offline report (no model):
 
 ```bash
 go run ./cmd/slither report /path/to/repo --out slither-report.md --top 80 --days 90
@@ -74,7 +73,7 @@ Score with OpenRouter via wormhole:
 
 ```bash
 OPENROUTER_API_KEY=... go run ./cmd/slither report /path/to/repo \
-  --model deepseek/deepseek-v4-pro \
+  --model z-ai/glm-5.2 \
   --base-url https://openrouter.ai/api/v1 \
   --out slither-report.md
 ```
@@ -95,18 +94,11 @@ The Markdown report leads with **Executive Triage** (confidence breakdown,
 review lanes, and a start-here pointer), then **Ranked Files** (a compact table
 of the top production files with confidence, evidence, review command, key
 signals, and a note), and finally **Detailed Signals** (per-file seed score,
-class, churn, and risk fields). Generated files, derived reports, cache
-artifacts, documentation, and test/fixture files are omitted from the ranked
-queue; documentation and test risks appear in separate **Documentation Rows**
-and **Test Risk Rows** sections when present. `--json` retains all reported
-evidence rows. Discovery counts, the pattern source, and skipped signals are
+class, churn, and risk fields). Generated, documentation, and test/fixture
+files are omitted from the ranked queue and appear in separate **Documentation
+Rows** and **Test Risk Rows** sections when present; `--json` retains the full
+evidence set. Discovery counts, the pattern source, and skipped signals are
 included so missing evidence is visible rather than treated as low risk.
-
-SQL migration review commands use `TEST_DATABASE_URL` so syntax/application
-checks target an explicit test database instead of an ambient default.
-Standalone JavaScript and TypeScript files without a nearby package script use
-`bun build --no-bundle` as a parse/transpile check instead of executing the
-script.
 
 ### JSON envelope (`--json`)
 
