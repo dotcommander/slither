@@ -22,8 +22,9 @@ const (
 
 type ModelScorer struct {
 	wh      *wormhole.Wormhole
-	model   string
-	baseURL string
+	model          string
+	baseURL        string
+	fallbackModels []string
 	// generate performs one model call and returns the raw response content.
 	// Injectable so batch scoring can be tested without a live model.
 	generate func(ctx context.Context, prompt string, maxTokens int) (string, error)
@@ -50,9 +51,9 @@ func NewModelScorer(opts Options) (*ModelScorer, error) {
 			wormhole.WithDefaultProvider("openai"),
 		)
 	}
-	scorer := &ModelScorer{wh: wh, model: opts.Model, baseURL: opts.BaseURL}
+	scorer := &ModelScorer{wh: wh, model: opts.Model, baseURL: opts.BaseURL, fallbackModels: opts.FallbackModels}
 	scorer.generate = func(ctx context.Context, prompt string, maxTokens int) (string, error) {
-		resp, err := scorer.wh.Text().Model(scorer.model).Prompt(prompt).Temperature(0).MaxTokens(maxTokens).Generate(ctx)
+		resp, err := scorer.wh.Text().Model(scorer.model).WithFallback(scorer.fallbackModels...).Prompt(prompt).Temperature(0).MaxTokens(maxTokens).Generate(ctx)
 		if err != nil {
 			return "", err
 		}

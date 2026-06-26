@@ -94,7 +94,7 @@ func normalizeReportArgs(args []string) []string {
 func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv}
+	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv, FallbackModels: cfg.FallbackModels}
 	fs.StringVar(&opts.Out, "out", opts.Out, "Markdown report path, or - for stdout")
 	fs.IntVar(&opts.Top, "top", opts.Top, "ranked production files to include")
 	fs.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum bytes to inspect per file")
@@ -106,6 +106,7 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	fs.BoolVar(&opts.Local, "local", false, "use local OpenAI-compatible model profile")
 	fs.BoolVar(&opts.JSON, "json", false, "emit a machine-readable JSON evidence envelope")
 	fs.BoolVar(&opts.Cull, "cull", false, "append a cheap-model cull ledger over reported rows")
+	fs.BoolVar(&opts.NoCache, "no-cache", false, "disable the content-hash score cache")
 	if err := fs.Parse(normalizeReportArgs(args)); err != nil {
 		return Options{}, err
 	}
@@ -128,6 +129,9 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 		opts.Out = "slither-report.json"
 	}
 	if opts.Local {
+		// Config fallback IDs are provider-specific (OpenRouter) and do not apply
+		// to the local single-model server; clear them to avoid futile failover.
+		opts.FallbackModels = nil
 		if opts.Model == "" {
 			opts.Model = cfg.Local.Model
 		}

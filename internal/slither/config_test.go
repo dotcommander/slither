@@ -137,3 +137,39 @@ func TestResolveReportOptionsLocalUsesConfigProfile(t *testing.T) {
 		t.Fatalf("api key env = %q, want local profile %q", opts.APIKeyEnv, cfg.Local.APIKeyEnv)
 	}
 }
+
+func TestResolveReportOptionsThreadsFallbackModels(t *testing.T) {
+	t.Parallel()
+	cfg := Config{Model: "m", BaseURL: "https://config.test/v1", FallbackModels: []string{"a", "b"}}
+	opts, err := resolveReportOptions(cfg, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.FallbackModels) != 2 || opts.FallbackModels[0] != "a" {
+		t.Fatalf("FallbackModels = %#v, want config values", opts.FallbackModels)
+	}
+}
+
+func TestResolveReportOptionsLocalClearsFallbackModels(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.FallbackModels = []string{"a", "b"}
+	opts, err := resolveReportOptions(cfg, []string{"--local", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.FallbackModels) != 0 {
+		t.Fatalf("FallbackModels = %#v, want cleared under --local", opts.FallbackModels)
+	}
+}
+
+func TestResolveReportOptionsNoCacheFlag(t *testing.T) {
+	t.Parallel()
+	opts, err := resolveReportOptions(defaultConfig(), []string{"--no-cache", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.NoCache {
+		t.Fatal("--no-cache did not set opts.NoCache")
+	}
+}

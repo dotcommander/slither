@@ -75,7 +75,13 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		// Score the top deterministic band concurrently in batches; results are
 		// written back in place, preserving order. Rows beyond scoreLimit keep
 		// their deterministic score.
-		scoreTopRows(ctx, scorer, rows[:scoreLimit], modelBatchSize, modelScoreConcurrency)
+		if opts.NoCache {
+			scoreTopRows(ctx, scorer, rows[:scoreLimit], modelBatchSize, modelScoreConcurrency)
+		} else {
+			cache := loadScoreCache()
+			scoreTopRowsCached(ctx, scorer, rows[:scoreLimit], cache)
+			_ = cache.persist()
+		}
 	}
 	for i := range rows {
 		evidence := rows[i]

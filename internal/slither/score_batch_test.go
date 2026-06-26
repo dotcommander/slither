@@ -146,3 +146,18 @@ func TestScoreTopRowsPreservesOrderAndCount(t *testing.T) {
 		}
 	}
 }
+
+func TestNewModelScorerThreadsFallbackModels(t *testing.T) {
+	t.Parallel()
+	opts := Options{Model: "primary", BaseURL: "https://example.test/v1", FallbackModels: []string{"fb1", "fb2"}}
+	s, err := NewModelScorer(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s == nil {
+		t.Fatal("expected scorer for non-empty model")
+	}
+	if len(s.fallbackModels) != 2 || s.fallbackModels[0] != "fb1" || s.fallbackModels[1] != "fb2" {
+		t.Fatalf("fallbackModels = %#v, want [fb1 fb2]", s.fallbackModels)
+	}
+}

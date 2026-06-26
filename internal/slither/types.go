@@ -13,8 +13,10 @@ type Options struct {
 	BaseURL   string
 	APIKeyEnv string
 	Local     bool
-	JSON      bool
-	Cull      bool
+	JSON           bool
+	Cull           bool
+	FallbackModels []string
+	NoCache        bool
 }
 
 type FileEvidence struct {
