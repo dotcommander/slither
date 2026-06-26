@@ -203,13 +203,28 @@ func confidenceForRow(row FileEvidence) string {
 	switch {
 	case stringSliceContains(row.EvidenceLayers, "model-error") || stringSliceContains(row.EvidenceLayers, "low-signal"):
 		return "low"
-	case evidenceIntersectionCount(row) >= 3 || row.Score >= 5:
+	case isGeneratedOrReportPath(row.Path) || isTestOnlyCull(row) || needsMoreEvidence(row):
+		return "low"
+	case stringSliceContains(row.EvidenceLayers, "model"):
 		return "high"
-	case row.Score >= 3 || evidenceIntersectionCount(row) >= 2:
+	case strongDeterministicConfidence(row):
+		return "high"
+	case keepForPremium(row) || row.Score >= 3 || evidenceIntersectionCount(row) >= 2:
 		return "medium"
 	default:
 		return "low"
 	}
+}
+
+func strongDeterministicConfidence(row FileEvidence) bool {
+	if row.Score < 5 || evidenceIntersectionCount(row) < 3 {
+		return false
+	}
+	return rowHasHighRiskSignal(row) ||
+		row.HotspotRisk >= 4 ||
+		row.UnknownsRisk >= 5 ||
+		row.ContentRisk >= 15 ||
+		row.SmellRisk >= 4
 }
 
 func caveatForRow(row FileEvidence) string {

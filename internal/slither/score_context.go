@@ -467,7 +467,7 @@ func hasNearbyTest(repo, rel string) bool {
 	dir := filepath.Join(repo, filepath.Dir(rel))
 	switch ext {
 	case ".go":
-		return fileExists(filepath.Join(dir, stem+"_test.go"))
+		return fileExists(filepath.Join(dir, stem+"_test.go")) || dirHasSuffixFile(dir, "_test.go")
 	case ".py":
 		return fileExists(filepath.Join(dir, "test_"+stem+".py")) || fileExists(filepath.Join(dir, stem+"_test.py"))
 	case ".ts", ".tsx", ".js", ".jsx":
@@ -475,6 +475,19 @@ func hasNearbyTest(repo, rel string) bool {
 	default:
 		return true
 	}
+}
+
+func dirHasSuffixFile(dir, suffix string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func fileExists(path string) bool {

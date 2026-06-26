@@ -397,7 +397,7 @@
     },
     {
       "id": "looped_io_or_query",
-      "pattern": "(?s)\\b(for|while)\\b.{0,400}\\b(Query|Exec|fetch|axios\\.|http\\.|findMany|findUnique|SELECT|INSERT|UPDATE|DELETE)\\b",
+      "pattern": "(?is)\\b(?:for|while)\\b[^\\{;\\n]{0,160}\\{.{0,600}(?:\\b(?:Query(?:Context)?|Exec(?:Context)?|fetch|findMany|findUnique)\\s*\\(|\\b(?:SELECT|INSERT|UPDATE|DELETE)\\b)",
       "weight": 3,
       "max_matches": 3
     },
@@ -876,9 +876,9 @@
       "max_matches": 5
     },
     {
-      "id": "embedding_without_persistence",
-      "pattern": "\\b(CLIP|embedding|embeddings|vector|cosine similarity|cosine_similarity)\\b",
-      "weight": 2,
+      "id": "vector_embedding_surface",
+      "pattern": "(?i)(?:\\b(?:embedding|embeddings|vector|vectors|cosine(?:_similarity|\\s+similarity))\\b.{0,100}\\b(?:search|index|score|similar|query|store|save|scan|chunk|blob|float32|hamming)\\b|\\b(?:SearchSimilar|SimilarityResult|ExactIndex|BinaryIndex|SaveEmbedding|EmbeddingVersion)\\b|\\[\\]float32)",
+      "weight": 1,
       "max_matches": 5
     },
     {

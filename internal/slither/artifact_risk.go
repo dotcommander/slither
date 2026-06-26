@@ -394,7 +394,9 @@ func sdkMethodStem(name string) string {
 
 func openAPIContractRisk(rel, text string) (int, []string) {
 	lower := strings.ToLower(rel)
-	if !(strings.Contains(lower, "openapi") || strings.Contains(lower, "swagger") || strings.Contains(text, "openapi:") || strings.Contains(text, `"openapi"`)) {
+	hasSpecPath := strings.Contains(lower, "openapi") || strings.Contains(lower, "swagger")
+	hasSpecMarker := regexpMust(`(?mi)^\s*openapi\s*:\s*['"]?\d|"\s*openapi\s*"\s*:\s*"\d`).FindStringIndex(text) != nil
+	if !hasSpecPath && !hasSpecMarker {
 		return 0, nil
 	}
 	operations := len(regexpMust(`(?mi)^\s+(get|put|post|delete|options|head|patch|trace):\s*$|"(get|put|post|delete|options|head|patch|trace)"\s*:`).FindAllStringIndex(text, -1))

@@ -451,28 +451,35 @@ func ownershipRisk(info ownershipInfo, churn, fixTouches, pathScore, contentScor
 	if info.Touches == 0 {
 		return 0, nil
 	}
-	riskContext := pathScore >= 2 || contentScore >= 4 || fixTouches > 0 || churn >= 120
+	reviewPressure := fixTouches > 0 || churn >= 120 || pathScore >= 3 || contentScore >= 8
+	if info.Touches < 3 || !reviewPressure {
+		return 0, nil
+	}
+	riskContext := fixTouches > 0 || churn >= 120 || (pathScore >= 3 && contentScore >= 4) || contentScore >= 10
 	if !riskContext {
 		return 0, nil
 	}
 	score := 0
 	var reasons []string
 	if info.AuthorCount == 1 {
-		score += 4
+		score += 2
 		reasons = append(reasons, "ownership:risky_single_author")
 	} else if info.AuthorCount == 2 {
 		score += 2
 		reasons = append(reasons, "ownership:risky_two_authors")
 	}
-	if info.TopShare >= 0.8 {
+	if info.AuthorCount > 1 && info.TopShare >= 0.8 {
 		score += 3
 		reasons = append(reasons, "ownership:top_author_share:"+formatFloat(info.TopShare))
-	} else if info.TopShare >= 0.65 {
+	} else if info.AuthorCount > 1 && info.TopShare >= 0.65 {
 		score += 2
 		reasons = append(reasons, "ownership:top_author_share:"+formatFloat(info.TopShare))
 	}
-	if info.Touches >= 5 {
+	if info.Touches >= 10 {
 		score += 2
+		reasons = append(reasons, "ownership:concentrated_touches:"+itoa(info.Touches))
+	} else if info.Touches >= 5 {
+		score++
 		reasons = append(reasons, "ownership:concentrated_touches:"+itoa(info.Touches))
 	}
 	return score, reasons

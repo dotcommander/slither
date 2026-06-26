@@ -2,10 +2,16 @@ package slither
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 const maxPremiumCullSeeds = 24
+
+type cullCandidate struct {
+	row   FileEvidence
+	entry CullEntry
+}
 
 func BuildCullLedger(report Report) CullLedger {
 	firstReadQueue := report.FirstReadQueue
@@ -31,7 +37,7 @@ func BuildCullLedger(report Report) CullLedger {
 		NeedsEvidence:  CullBucket{Examples: []CullEntry{}},
 	}
 	seenSurfaces := map[string]string{}
-	premiumSeeds := 0
+	var premiumCandidates []cullCandidate
 	for _, row := range report.Rows {
 		entry := cullEntry(row, "")
 		surfaceKey := cullSurfaceKey(row)
@@ -47,16 +53,8 @@ func BuildCullLedger(report Report) CullLedger {
 			entry.Reason = "same evidence surface represented by stronger row " + duplicateOf
 			addCullEntry(&ledger.Duplicate, entry, 3)
 		case keepForPremium(row):
-			if premiumSeeds < maxPremiumCullSeeds {
-				entry.Reason = "strong multi-layer seed"
-				addCullEntry(&ledger.KeptForPremium, entry, 0)
-				premiumSeeds++
-				seenSurfaces[surfaceKey] = row.Path
-			} else {
-				entry.Reason = "strong seed beyond kept_for_premium cap"
-				addCullEntry(&ledger.Alternates, entry, 3)
-				seenSurfaces[surfaceKey] = row.Path
-			}
+			premiumCandidates = append(premiumCandidates, cullCandidate{row: row, entry: entry})
+			seenSurfaces[surfaceKey] = row.Path
 		case needsMoreEvidence(row):
 			entry.Reason = "lexical or single-lane evidence needs corroboration"
 			addCullEntry(&ledger.NeedsEvidence, entry, 3)
@@ -69,7 +67,67 @@ func BuildCullLedger(report Report) CullLedger {
 			addCullEntry(&ledger.LowSignal, entry, 3)
 		}
 	}
+	addPremiumCandidates(&ledger, premiumCandidates)
 	return ledger
+}
+
+func addPremiumCandidates(ledger *CullLedger, candidates []cullCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return premiumCandidateLess(candidates[i].row, candidates[j].row)
+	})
+	for i, candidate := range candidates {
+		if i < maxPremiumCullSeeds {
+			candidate.entry.Reason = "strong multi-layer seed"
+			addCullEntry(&ledger.KeptForPremium, candidate.entry, 0)
+			continue
+		}
+		candidate.entry.Reason = "strong seed beyond kept_for_premium cap"
+		addCullEntry(&ledger.Alternates, candidate.entry, 3)
+	}
+}
+
+func premiumCandidateLess(a, b FileEvidence) bool {
+	for _, cmp := range []func(FileEvidence) float64{
+		func(row FileEvidence) float64 { return float64(confidenceRank(effectiveConfidence(row))) },
+		func(row FileEvidence) float64 { return float64(row.Score) },
+		func(row FileEvidence) float64 { return row.SeedScore },
+		func(row FileEvidence) float64 { return float64(evidenceIntersectionCount(row)) },
+		func(row FileEvidence) float64 { return float64(rowHighRiskRank(row)) },
+	} {
+		left := cmp(a)
+		right := cmp(b)
+		if left != right {
+			return left > right
+		}
+	}
+	return a.Path < b.Path
+}
+
+func effectiveConfidence(row FileEvidence) string {
+	if row.Confidence != "" {
+		return row.Confidence
+	}
+	return confidenceForRow(row)
+}
+
+func confidenceRank(confidence string) int {
+	switch confidence {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func rowHighRiskRank(row FileEvidence) int {
+	if rowHasHighRiskSignal(row) {
+		return 1
+	}
+	return 0
 }
 
 func addCullEntry(bucket *CullBucket, entry CullEntry, maxExamples int) {
