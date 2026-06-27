@@ -170,8 +170,8 @@ func writeExecutiveTriageMarkdown(b *strings.Builder, report Report) {
 	if len(stats.TopLayers) > 0 {
 		fmt.Fprintf(b, "- Dominant discriminating evidence layers: `%s`\n", strings.Join(stats.TopLayers, "`, `"))
 	}
-	if counts := actionabilityCounts(report.Rows); len(counts) > 0 {
-		fmt.Fprintf(b, "- Actionability: `%s`\n", strings.Join(counts, "`, `"))
+	if counts := actionabilityCounts(reviewableActionabilityRows(report.Rows)); len(counts) > 0 {
+		fmt.Fprintf(b, "- Actionability in ranked production rows: `%s`\n", strings.Join(counts, "`, `"))
 	}
 	if len(report.ReviewPlan) > 0 {
 		fmt.Fprintf(b, "- Review lanes: `%s`\n", strings.Join(reviewLaneNames(report.ReviewPlan), "`, `"))
@@ -341,6 +341,10 @@ func reviewLaneNames(plan []ReviewLane) []string {
 		names = append(names, lane.Lane)
 	}
 	return names
+}
+
+func reviewableActionabilityRows(rows []FileEvidence) []FileEvidence {
+	return rankedMarkdownRows(rows)
 }
 
 func actionabilityCounts(rows []FileEvidence) []string {

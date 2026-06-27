@@ -526,11 +526,11 @@ func verifyCmdForPathInRepo(repo, path string) string {
 	case rel == "go.mod" || rel == "go.sum":
 		return "go list -m all"
 	case strings.HasSuffix(rel, ".go"):
-		dir := filepath.Dir(rel)
-		if dir == "." {
-			return "go test ./..."
-		}
-		return "go test ./" + dir + "/..."
+		return goVerifyCmdForPath(repo, rel)
+	case isShellScriptPath(rel):
+		return "bash -n " + rel
+	case isRepoConfigPath(rel) && verificationProfileForRepo(repo) == "go":
+		return goVerifyCmdForPath(repo, rel)
 	case strings.HasPrefix(rel, "docs/") || strings.EqualFold(filepath.Base(rel), "README.md"):
 		return translateGenericVerifyCmd(repo, verificationProfileForRepo(repo), "go test ./...")
 	case strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/"):
@@ -564,6 +564,63 @@ func phpVerifyCmd(repo, rel string) string {
 		return "php -l " + rel
 	}
 	return ""
+}
+
+func goVerifyCmdForPath(repo, rel string) string {
+	dir := nearestGoPackageDir(repo, rel)
+	if dir == "." {
+		return "go test ./..."
+	}
+	return "go test ./" + dir + "/..."
+}
+
+func nearestGoPackageDir(repo, rel string) string {
+	dir := filepath.Dir(filepath.ToSlash(rel))
+	if dir == "." {
+		return "."
+	}
+	if repo == "" {
+		return dir
+	}
+	for {
+		if directoryHasGoFiles(repo, dir) {
+			return dir
+		}
+		if dir == "." {
+			return "."
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+func directoryHasGoFiles(repo, relDir string) bool {
+	entries, err := os.ReadDir(filepath.Join(repo, relDir))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".go") {
+			return true
+		}
+	}
+	return false
+}
+
+func isShellScriptPath(rel string) bool {
+	lower := strings.ToLower(filepath.ToSlash(rel))
+	return strings.HasSuffix(lower, ".sh") || strings.HasPrefix(lower, "scripts/") || strings.HasPrefix(lower, "runs/")
+}
+
+func isRepoConfigPath(rel string) bool {
+	switch strings.ToLower(filepath.Ext(rel)) {
+	case ".yaml", ".yml", ".toml", ".json":
+		return true
+	default:
+		return false
+	}
 }
 
 func commandDocsVerifyCmd(repo, rel string) string {

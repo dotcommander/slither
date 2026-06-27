@@ -883,7 +883,7 @@
     },
     {
       "id": "blocking_inline_worker",
-      "pattern": "\\b(caption|classify|encode|infer|transcribe|embed)\\w*\\s*\\([^\\n;]*\\)",
+      "pattern": "\\b(caption|encode|infer|transcribe|embed)\\w*\\s*\\([^\\n;]*\\)|\\bclassify(?:Image|Text|Audio|Video|Content|Document)\\w*\\s*\\([^\\n;]*\\)",
       "weight": 1,
       "max_matches": 5
     },
@@ -949,13 +949,13 @@
     },
     {
       "id": "error_context_dropped",
-      "pattern": "\\bfmt\\.Errorf\\s*\\([^\\n)]*%[vs][^\\n)]*\\berr\\b|catch\\s*\\([^)]*\\)\\s*\\{(?:(?!cause\\s*:).){0,400}\\bthrow\\s+new\\s+Error\\s*\\(",
+      "pattern": "\\bfmt\\.Errorf\\s*\\(\\s*[\"'](?:(?!%w)[^\\n])*%[vs](?:(?!%w)[^\\n])*[\"'][^\\n)]*\\berr\\b|catch\\s*\\([^)]*\\)\\s*\\{(?:(?!cause\\s*:).){0,400}\\bthrow\\s+new\\s+Error\\s*\\(",
       "weight": 3,
       "max_matches": 5
     },
     {
       "id": "read_all_or_global_growth",
-      "pattern": "\\bio\\.ReadAll\\s*\\(|\\b(?:const|let|var)\\s+\\w+\\s*=\\s*new\\s+Map\\s*<|\\bvar\\s+\\w+\\s+map\\[",
+      "pattern": "\\bio\\.ReadAll\\s*\\(\\s*(?![^\\n)]*LimitReader)|\\b(?:const|let|var)\\s+\\w+\\s*=\\s*new\\s+Map\\s*<|(?m)^var\\s+\\w+\\s+map\\[",
       "weight": 3,
       "max_matches": 5
     },

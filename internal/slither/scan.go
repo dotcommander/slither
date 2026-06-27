@@ -80,7 +80,9 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		} else {
 			cache := loadScoreCache()
 			hits, misses := scoreTopRowsCached(ctx, scorer, rows[:scoreLimit], cache)
-			_ = cache.persist()
+			if signal := scoreCachePersistSkippedSignal(cache); signal != "" {
+				report.SkippedSignals = append(report.SkippedSignals, signal)
+			}
 			report.CacheStats = &CacheStats{Hits: hits, Misses: misses}
 		}
 	}
@@ -463,21 +465,22 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	envVars := envVarsInCode(e.Path, text)
 	e.EnvContractRisk, reasons = envContractRisk(envVars, scoreCtx.documentedEnv, e.Churn, e.FixTouches, e.PathRisk, e.ContentRisk, e.UnknownsRisk)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.WorkflowSecurityRisk, reasons = workflowSecurityRisk(e.Path, text)
+	detectorText := textWithoutDetectorLiterals(text)
+	e.WorkflowSecurityRisk, reasons = workflowSecurityRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.MigrationSafetyRisk, reasons = migrationSafetyRisk(e.Path, text)
+	e.MigrationSafetyRisk, reasons = migrationSafetyRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.ContainerBuildRisk, reasons = containerBuildRisk(e.Path, text)
+	e.ContainerBuildRisk, reasons = containerBuildRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.KubernetesSecurityRisk, reasons = kubernetesSecurityRisk(e.Path, text)
+	e.KubernetesSecurityRisk, reasons = kubernetesSecurityRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.TerraformSecurityRisk, reasons = terraformSecurityRisk(e.Path, text)
+	e.TerraformSecurityRisk, reasons = terraformSecurityRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.OpenAPIContractRisk, reasons = openAPIContractRisk(e.Path, text)
+	e.OpenAPIContractRisk, reasons = openAPIContractRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.CORSSecurityRisk, reasons = corsSecurityRisk(e.Path, text)
+	e.CORSSecurityRisk, reasons = corsSecurityRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.CookieSecurityRisk, reasons = cookieSecurityRisk(e.Path, text)
+	e.CookieSecurityRisk, reasons = cookieSecurityRisk(e.Path, detectorText)
 	e.Reasons = append(e.Reasons, reasons...)
 	e.DependencyHealthRisk, reasons = dependencyHealthRisk(e.Path, text)
 	e.Reasons = append(e.Reasons, reasons...)
@@ -529,6 +532,7 @@ func textWithoutDetectorLiterals(text string) string {
 		if strings.Contains(lower, "fallbackcontentterms") ||
 			strings.Contains(lower, "fallbackpathterms") ||
 			strings.Contains(lower, "pattern(") ||
+			strings.Contains(lower, "regexpmust(") ||
 			strings.Contains(lower, "regexp.mustcompile") ||
 			strings.Contains(line, "Term:") {
 			lines = append(lines, "")

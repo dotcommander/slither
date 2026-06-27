@@ -126,10 +126,10 @@ var fallbackContentPatterns = []contentPattern{
 	pattern("credential_assignment_literal", `(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\b\s*[:=]\s*["'](?!(?:local-)?placeholder["']|example["']|dummy["']|test["']|changeme["']|your[-_][^"']*["'])[^"']{12,}["']`, 4, 5, "secret-risk"),
 	pattern("background_context", `\bcontext\.Background\s*\(`, 2, 4, "unknowns"),
 	pattern("resource_lifecycle", `\b(Open|Connect|NewClient|NewRequest|http\.Client|sql\.Open)\s*\(`, 2, 4, "unknowns"),
-	pattern("read_all_or_global_growth", `\bio\.ReadAll\s*\(|append\s*\([^)]*\.\.\.\)`, 3, 5, "unknowns"),
+	pattern("read_all_or_global_growth", `\bio\.ReadAll\s*\(\s*(?![^\n)]*LimitReader)|append\s*\([^)]*\.\.\.\)`, 3, 5, "unknowns"),
 	pattern("go_module_replace", `(?m)^replace\s+`, 3, 5, "dependency-health"),
 	pattern("os_specific_command", `\b(?:open|osascript|xdg-open|cmd\.exe|powershell)\b`, 3, 5, "content-risk"),
-	pattern("error_context_dropped", `(?m)return\s+err\s*$`, 3, 5, "content-risk"),
+	pattern("error_context_dropped", `\bfmt\.Errorf\s*\(\s*["'](?:(?!%w)[^\n])*%[vs](?:(?!%w)[^\n])*["'][^\n)]*\berr\b|catch\s*\([^)]*\)\s*\{(?:(?!cause\s*:).){0,400}\bthrow\s+new\s+Error\s*\(`, 3, 5, "content-risk"),
 }
 
 func loadScoringPatterns(path string) (scoringPatterns, error) {

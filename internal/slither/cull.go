@@ -59,7 +59,7 @@ func BuildCullLedger(report Report) CullLedger {
 		if disposition.Decision == CullDecisionKeptForPremium || disposition.Reason == cullReasonPremiumOverflow {
 			continue
 		}
-		addCullDisposition(&ledger, disposition.Decision, cullEntry(report.Rows[i], disposition.Reason))
+		addCullDisposition(&ledger, disposition.Decision, cullEntry(report.Rows[i], disposition.Decision, disposition.Reason))
 	}
 	addPremiumDispositionEntries(&ledger, report.Rows, dispositions)
 	return ledger
@@ -123,7 +123,7 @@ func addPremiumDispositionEntries(ledger *CullLedger, rows []FileEvidence, dispo
 	})
 	for _, candidate := range candidates {
 		disposition := dispositions[candidate.index]
-		addCullDisposition(ledger, disposition.Decision, cullEntry(candidate.row, disposition.Reason))
+		addCullDisposition(ledger, disposition.Decision, cullEntry(candidate.row, disposition.Decision, disposition.Reason))
 	}
 }
 
@@ -198,8 +198,18 @@ func rowsWithCullDispositions(rows []FileEvidence) []FileEvidence {
 	for i, disposition := range classifyCullDispositions(rows) {
 		out[i].CullDecision = disposition.Decision
 		out[i].CullReason = disposition.Reason
+		out[i].Actionability = actionabilityForCullDisposition(out[i], disposition.Decision)
 	}
 	return out
+}
+
+func actionabilityForCullDisposition(row FileEvidence, decision CullDecision) Actionability {
+	switch decision {
+	case CullDecisionKeptForPremium, CullDecisionAlternates:
+		return actionabilityForRow(row)
+	default:
+		return ActionabilityVerifyFirst
+	}
 }
 
 func addCullEntry(bucket *CullBucket, entry CullEntry, maxExamples int) {
@@ -209,13 +219,13 @@ func addCullEntry(bucket *CullBucket, entry CullEntry, maxExamples int) {
 	}
 }
 
-func cullEntry(row FileEvidence, reason string) CullEntry {
+func cullEntry(row FileEvidence, decision CullDecision, reason string) CullEntry {
 	return CullEntry{
 		Path:                          row.Path,
 		Score:                         row.Score,
 		EvidenceClass:                 row.EvidenceClass,
 		Confidence:                    row.Confidence,
-		Actionability:                 actionabilityForRow(row),
+		Actionability:                 actionabilityForCullDisposition(row, decision),
 		Caveat:                        row.Caveat,
 		VerifyCmd:                     row.VerifyCmd,
 		EvidenceLayers:                row.EvidenceLayers,
@@ -313,6 +323,8 @@ func isGeneratedOrReportPath(path string) bool {
 		strings.HasSuffix(lower, ".min.js") ||
 		strings.HasSuffix(lower, ".bundle.js") ||
 		strings.HasSuffix(lower, ".gitignore") ||
+		strings.HasSuffix(lower, "/triage_patterns.json") ||
+		lower == "triage_patterns.json" ||
 		strings.HasPrefix(lower, ".work/") ||
 		strings.HasPrefix(lower, "prototypes/") ||
 		strings.HasPrefix(lower, "stubs/") ||
@@ -362,6 +374,9 @@ func cullSurfaceKey(row FileEvidence) string {
 		limit := min(len(row.EvidenceLayers), 2)
 		layers = strings.Join(row.EvidenceLayers[:limit], "+")
 	}
+	if pathReason := firstReasonWithPrefix(row.Reasons, "path:"); pathReason != "" {
+		layers += "+" + pathReason
+	}
 	if dir == "." {
 		ext := filepath.Ext(path)
 		if ext == "" {
@@ -370,4 +385,13 @@ func cullSurfaceKey(row FileEvidence) string {
 		return dir + "|" + ext + "|" + layers
 	}
 	return dir + "|" + layers
+}
+
+func firstReasonWithPrefix(reasons []string, prefix string) string {
+	for _, reason := range reasons {
+		if strings.HasPrefix(reason, prefix) {
+			return reason
+		}
+	}
+	return ""
 }

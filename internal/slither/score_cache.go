@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -19,6 +21,11 @@ const promptVersion = "1"
 // keys used (hit or written) this run; cold entries for files no longer scanned
 // are dropped first.
 const maxCacheEntries = 5000
+
+// maxScoreCacheBytes bounds cache loading before JSON decode. The persisted
+// cache is an optimization; an oversized preexisting cache should be ignored
+// instead of letting startup memory scale with a stale artifact.
+const maxScoreCacheBytes = 8 << 20
 
 // cachedScore is the persisted model result for one file. Only genuine model
 // scores are stored — degraded (model_error) rows are never cached.
@@ -55,7 +62,7 @@ func loadScoreCache() *scoreCache {
 		return c
 	}
 	c.path = path
-	data, err := os.ReadFile(path)
+	data, err := readScoreCacheFile(path)
 	if err != nil {
 		return c
 	}
@@ -67,6 +74,22 @@ func loadScoreCache() *scoreCache {
 		c.entries = entries
 	}
 	return c
+}
+
+func readScoreCacheFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxScoreCacheBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxScoreCacheBytes {
+		return nil, fmt.Errorf("score cache exceeds %d bytes", maxScoreCacheBytes)
+	}
+	return data, nil
 }
 
 func (c *scoreCache) lookup(key string) (cachedScore, bool) {
@@ -140,6 +163,16 @@ func (c *scoreCache) persist() error {
 		return err
 	}
 	return os.WriteFile(c.path, append(data, '\n'), 0o644)
+}
+
+func scoreCachePersistSkippedSignal(cache *scoreCache) string {
+	if cache == nil {
+		return ""
+	}
+	if err := cache.persist(); err != nil {
+		return "score_cache:persist_failed"
+	}
+	return ""
 }
 
 // scoreCacheKey hashes the inputs that determine the model's score: the prompt
