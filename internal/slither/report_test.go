@@ -36,6 +36,12 @@ func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
 	if !contains(report.Rows[0].EvidenceLayers, "path-risk") || !contains(report.Rows[0].EvidenceLayers, "content-risk") {
 		t.Fatalf("layers = %#v, want path-risk and content-risk", report.Rows[0].EvidenceLayers)
 	}
+	if len(report.Rows[0].EvidenceLocations) == 0 {
+		t.Fatalf("expected content evidence locations for %#v", report.Rows[0].Reasons)
+	}
+	if got := report.Rows[0].EvidenceLocations[0]; got.Line == 0 || got.Snippet == "" || !strings.HasPrefix(got.Reason, "content:") {
+		t.Fatalf("bad evidence location: %#v", got)
+	}
 	if !contains(report.SkippedSignals, "git_ls_files:unavailable") || !contains(report.SkippedSignals, "model_scoring:not_configured") {
 		t.Fatalf("skipped signals = %#v, want git/model skipped signals", report.SkippedSignals)
 	}
@@ -43,7 +49,7 @@ func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
 
 func TestBuildReportClassifiesContentSecretsAsSecretRisk(t *testing.T) {
 	tmp := t.TempDir()
-	writeFile(t, tmp, "main.go", "package main\n\nconst token = \"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
+	writeFile(t, tmp, "main.go", "package main\n\nconst token = YOUR_API_KEY"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
 
 	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 1000})
 	if err != nil {
@@ -152,9 +158,9 @@ func TestInspectFileSkipsDirectoryCandidates(t *testing.T) {
 }
 
 func TestRenderMarkdownIncludesSnakeIdentity(t *testing.T) {
-	report := Report{Repo: "/repo", FilesSeen: 1, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 3, SeedScore: 1.5, EvidenceClass: "heuristic", Confidence: "low", EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}, Reasons: []string{"path:auth", "env_contract:missing"}, Summary: "sample"}}}
+	report := Report{Repo: "/repo", FilesSeen: 1, Build: BuildInfo{Version: "devel", Revision: "abcdef1234567890", GoVersion: "go1.26.0"}, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 3, SeedScore: 1.5, EvidenceClass: "heuristic", Confidence: "low", EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}, Reasons: []string{"path:auth", "env_contract:missing"}, Summary: "sample"}}}
 	md := RenderMarkdown(report)
-	for _, want := range []string{"# Slither Report", "snake through", "Discovery: source `git`", "Skipped signals", "## Executive Triage", "Confidence: high", "## Ranked Files", "## Detailed Signals", "seed_score", "env_contract_risk=3", "path-risk", "`a.go`"} {
+	for _, want := range []string{"# Slither Report", "snake through", "Slither build:", "Discovery: source `git`", "Skipped signals", "## Executive Triage", "Confidence: high", "Actionability:", "## Ranked Files", "## Detailed Signals", "actionability", "seed_score", "env_contract_risk=3", "path-risk", "`a.go`"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}
@@ -165,10 +171,13 @@ func TestRenderMarkdownIncludesSnakeIdentity(t *testing.T) {
 	if strings.Contains(md, "workflow_security_risk | migration_safety_risk") {
 		t.Fatalf("markdown still includes the old all-risk wide table:\n%s", md)
 	}
+	if start := markdownLineWithPrefix(md, "- Start with:"); strings.Contains(start, "path:") || strings.Contains(start, "content:") {
+		t.Fatalf("start-here summary should use human signal labels, not raw reason keys: %s", start)
+	}
 }
 
 func TestRenderJSONIncludesEvidenceEnvelope(t *testing.T) {
-	report := Report{Repo: "/repo", FilesSeen: 1, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 2, EvidenceLayers: []string{"path-risk"}, Reasons: []string{"path:auth"}, Summary: "sample"}}}
+	report := Report{Repo: "/repo", FilesSeen: 1, Build: BuildInfo{Version: "v1.2.3", Revision: "abc123"}, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 2, EvidenceLayers: []string{"path-risk"}, Reasons: []string{"path:auth"}, Summary: "sample"}}}
 	data, err := RenderJSON(report)
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +185,7 @@ func TestRenderJSONIncludesEvidenceEnvelope(t *testing.T) {
 	var payload struct {
 		RunLabel       string         `json:"run_label"`
 		Discovery      DiscoveryStats `json:"discovery"`
+		Build          BuildInfo      `json:"build"`
 		FilesReported  int            `json:"files_reported"`
 		SkippedSignals []string       `json:"skipped_signals"`
 		Rows           []FileEvidence `json:"rows"`
@@ -189,8 +199,86 @@ func TestRenderJSONIncludesEvidenceEnvelope(t *testing.T) {
 	if payload.Discovery.Source != "git" || payload.Discovery.GitTracked != 1 || payload.Discovery.CandidateFiles != 1 {
 		t.Fatalf("discovery = %#v, want git audit", payload.Discovery)
 	}
+	if payload.Build.Version != "v1.2.3" || payload.Build.Revision != "abc123" {
+		t.Fatalf("build = %#v, want report provenance", payload.Build)
+	}
 	if !contains(payload.SkippedSignals, "model_scoring:not_configured") || !contains(payload.Rows[0].EvidenceLayers, "path-risk") {
 		t.Fatalf("missing envelope evidence: %#v", payload)
+	}
+}
+
+func TestActionabilityClassifiesRows(t *testing.T) {
+	cases := []struct {
+		name string
+		row  FileEvidence
+		want Actionability
+	}{
+		{
+			name: "corroborated high risk",
+			row:  FileEvidence{Path: "internal/auth.go", Score: 5, ContentRisk: 5, WorkflowSecurityRisk: 5, EvidenceLayers: []string{"content-risk", "workflow-security"}, Reasons: []string{"workflow_security:unpinned_actions:1"}},
+			want: ActionabilityLikelyDefect,
+		},
+		{
+			name: "ordinary premium seed",
+			row:  FileEvidence{Path: "internal/service.go", Score: 5, ContentRisk: 5, CochangeRisk: 5, EvidenceLayers: []string{"content-risk", "cochange"}, Reasons: []string{"content:stateful_store:1"}},
+			want: ActionabilityInspect,
+		},
+		{
+			name: "dependency policy is review not defect",
+			row:  FileEvidence{Path: "go.mod", Score: 5, PathRisk: 4, ContentRisk: 4, DependencyHealthRisk: 4, EvidenceLayers: []string{"path-risk", "content-risk", "dependency-health"}, Reasons: []string{"dependency_health:go_module_replace"}},
+			want: ActionabilityDependencyReview,
+		},
+		{
+			name: "hotspot only",
+			row:  FileEvidence{Path: "internal/hot.go", Score: 2, HotspotRisk: 4, EvidenceLayers: []string{"hotspot"}, Reasons: []string{"git:hotspot"}},
+			want: ActionabilityHotspot,
+		},
+		{
+			name: "low score weak intersection",
+			row:  FileEvidence{Path: "internal/model_prompt.go", Score: 2, UnknownsRisk: 3, EvidenceLayers: []string{"unknowns", "work-marker", "churn"}, Reasons: []string{"unknowns:resource_factory:1"}},
+			want: ActionabilityVerifyFirst,
+		},
+		{
+			name: "detector fixture",
+			row:  FileEvidence{Path: "internal/risk_test.go", Score: 5, ContentRisk: 5, EvidenceLayers: []string{"content-risk"}, Reasons: []string{"content:open_redirect_redirect_param:1", "content:ssrf_url_param:1", "content:path_traversal_join:1"}},
+			want: ActionabilityVerifyFirst,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := actionabilityForRow(tc.row); got != tc.want {
+				t.Fatalf("actionability = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderJSONIncludesActionability(t *testing.T) {
+	report := Report{Repo: "/repo", FilesSeen: 1, Rows: []FileEvidence{{Path: "a.go", Score: 4, Actionability: ActionabilityInspect, EvidenceLayers: []string{"content-risk", "cochange"}, Reasons: []string{"content:stateful_store:1"}}}}
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"actionability": "inspect"`) {
+		t.Fatalf("json missing actionability:\n%s", data)
+	}
+}
+
+func TestRenderJSONIncludesEvidenceLocations(t *testing.T) {
+	report := Report{Repo: "/repo", FilesSeen: 1, Rows: []FileEvidence{{
+		Path:              "a.go",
+		Score:             3,
+		EvidenceLayers:    []string{"content-risk"},
+		Reasons:           []string{"content:shell_boundary:1"},
+		EvidenceLocations: []EvidenceLocation{{Reason: "content:shell_boundary:1", Line: 12, Snippet: "exec.CommandContext(ctx, \"go\", \"test\")"}},
+		Summary:           "sample",
+	}}}
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"evidence_locations"`) || !strings.Contains(string(data), `"line": 12`) {
+		t.Fatalf("json missing evidence locations:\n%s", data)
 	}
 }
 
@@ -270,10 +358,60 @@ func TestRenderMarkdownPlacesCullLedgerBeforeExhaustiveRows(t *testing.T) {
 	if cullIndex < 0 || rankedIndex < 0 || cullIndex > rankedIndex {
 		t.Fatalf("cull ledger should appear before ranked files:\n%s", md)
 	}
-	for _, want := range []string{"| file | score | confidence | verify | strongest_evidence_intersection | reason |", "`auth.go` | 5 | high | go test ./... | path-risk + content-risk | strong multi-layer seed"} {
+	for _, want := range []string{"| file | score | confidence | actionability | verify | strongest_evidence_intersection | reason |", "`auth.go` | 5 | high | - | go test ./... | path-risk + content-risk | strong multi-layer seed"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("cull ledger missing %q:\n%s", want, md)
 		}
+	}
+}
+
+func TestBuildCullLedgerCarriesActionability(t *testing.T) {
+	report := Report{
+		Repo: "/repo",
+		Rows: []FileEvidence{{
+			Path:           "internal/auth.go",
+			Score:          5,
+			Confidence:     "high",
+			Actionability:  ActionabilityInspect,
+			ContentRisk:    5,
+			CochangeRisk:   5,
+			EvidenceLayers: []string{"content-risk", "cochange"},
+			Reasons:        []string{"content:stateful_store:1"},
+		}},
+	}
+	ledger := BuildCullLedger(report)
+	if len(ledger.KeptForPremium.Examples) != 1 {
+		t.Fatalf("kept examples = %d, want 1", len(ledger.KeptForPremium.Examples))
+	}
+	if got := ledger.KeptForPremium.Examples[0].Actionability; got != ActionabilityInspect {
+		t.Fatalf("cull actionability = %q, want %q", got, ActionabilityInspect)
+	}
+}
+
+func TestCullSurfaceKeyKeepsRootFilesSeparatedByKind(t *testing.T) {
+	goMod := FileEvidence{Path: "go.mod", EvidenceLayers: []string{"path-risk", "content-risk"}}
+	mainGo := FileEvidence{Path: "main.go", EvidenceLayers: []string{"path-risk", "content-risk"}}
+	configGo := FileEvidence{Path: "config.go", EvidenceLayers: []string{"path-risk", "content-risk"}}
+	configCopyGo := FileEvidence{Path: "config_copy.go", EvidenceLayers: []string{"path-risk", "content-risk"}}
+	if cullSurfaceKey(goMod) == cullSurfaceKey(mainGo) {
+		t.Fatalf("root go.mod and main.go should not share duplicate surface key %q", cullSurfaceKey(goMod))
+	}
+	if cullSurfaceKey(configGo) != cullSurfaceKey(configCopyGo) {
+		t.Fatalf("same-kind root Go files should still share duplicate surface keys: %q vs %q", cullSurfaceKey(configGo), cullSurfaceKey(configCopyGo))
+	}
+}
+
+func TestRenderMarkdownCapsDetailedSignals(t *testing.T) {
+	rows := make([]FileEvidence, maxDetailedMarkdownRows+2)
+	for i := range rows {
+		rows[i] = FileEvidence{Path: fmt.Sprintf("internal/file_%03d.go", i), Score: 1, EvidenceClass: "heuristic", Actionability: ActionabilityVerifyFirst, Reasons: []string{"low-signal"}}
+	}
+	md := RenderMarkdown(Report{Repo: "/repo", Rows: rows})
+	if !strings.Contains(md, "Showing the first `80` of `82` rows") {
+		t.Fatalf("markdown missing detailed-signal cap note:\n%s", md)
+	}
+	if strings.Contains(md, "internal/file_081.go") {
+		t.Fatalf("markdown should omit detailed rows beyond cap:\n%s", md)
 	}
 }
 
@@ -715,6 +853,30 @@ func TestCaveatDoesNotDowngradePremiumKeepRows(t *testing.T) {
 	}
 }
 
+func TestCaveatLabelsDetectorFixtureRows(t *testing.T) {
+	row := FileEvidence{
+		Path: "internal/slither/report_test.go",
+		Reasons: []string{
+			"content:unsafe_yaml_load:1",
+			"content:prototype_pollution_request_merge:1",
+			"content:credential_assignment_literal:1",
+		},
+		EvidenceLayers: []string{"content-risk", "secret-risk"},
+	}
+	if !isDetectorFixtureRow(row) {
+		t.Fatal("expected detector fixture row")
+	}
+	if got := caveatForRow(row); !strings.Contains(got, "detector-like snippets") {
+		t.Fatalf("detector fixture caveat = %q", got)
+	}
+
+	source := row
+	source.Path = "internal/service/auth.go"
+	if isDetectorFixtureRow(source) {
+		t.Fatal("source file should not be detector fixture row")
+	}
+}
+
 func TestBuildReviewPlanPreservesRankedFileOrderBeforeTruncation(t *testing.T) {
 	rows := []FileEvidence{
 		{Path: "migrations/001_initial_schema.sql", Score: 5, PathRisk: 9, MigrationSafetyRisk: 6, EvidenceLayers: []string{"path-risk", "migration-safety"}},
@@ -782,6 +944,9 @@ func TestBuildReviewPlanUsesRepoNativeVerifyCommands(t *testing.T) {
 	if got := verifyCmdForPathInRepo(tmp, "package-lock.json"); got != "npm run build" {
 		t.Fatalf("package verify command = %q", got)
 	}
+	if got := verifyCmdForPathInRepo(tmp, "docs/remote-eval-report.html"); got != "" {
+		t.Fatalf("generated report verify command = %q, want empty", got)
+	}
 
 	_, plan := BuildReviewPlanForRepo(tmp, []FileEvidence{{
 		Path:           "app/Services/SupermemoryClient.php",
@@ -844,6 +1009,55 @@ func TestRenderJSONIncludesCullLedger(t *testing.T) {
 	}
 }
 
+func TestRenderJSONIncludesRowCullDispositionsWhenCullLedgerPresent(t *testing.T) {
+	report := Report{Repo: "/repo", Rows: []FileEvidence{
+		{Path: "auth.go", Score: 5, PathRisk: 5, ContentRisk: 5, EvidenceLayers: []string{"path-risk", "content-risk", "test-void"}},
+		{Path: "api/generated.pb.go", Score: 5, EvidenceLayers: []string{"content-risk"}},
+		{Path: "README.md", Score: 5, EvidenceLayers: []string{"path-risk"}},
+		{Path: "auth_test.go", Score: 3, EvidenceLayers: []string{"content-risk"}},
+		{Path: "weak.go", Score: 3, ContentRisk: 5, EvidenceLayers: []string{"content-risk"}},
+		{Path: "config.go", Score: 3, EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}},
+		{Path: "config_copy.go", Score: 2, EvidenceLayers: []string{"path-risk", "env-contract"}},
+		{Path: "notes.go", Score: 1, EvidenceLayers: []string{"low-signal"}},
+	}}
+	ledger := BuildCullLedger(report)
+	report.CullLedger = &ledger
+
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Rows []FileEvidence `json:"rows"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	assertDisposition := func(path string, decision CullDecision, reasonPart string) {
+		t.Helper()
+		row := findPayloadRow(payload.Rows, path)
+		if row == nil {
+			t.Fatalf("missing row %s in payload rows %#v", path, payload.Rows)
+		}
+		if row.CullDecision != decision {
+			t.Fatalf("%s cull_decision = %q, want %q", path, row.CullDecision, decision)
+		}
+		if !strings.Contains(row.CullReason, reasonPart) {
+			t.Fatalf("%s cull_reason = %q, want substring %q", path, row.CullReason, reasonPart)
+		}
+	}
+
+	assertDisposition("auth.go", CullDecisionKeptForPremium, "strong multi-layer seed")
+	assertDisposition("api/generated.pb.go", CullDecisionGenerated, "generated")
+	assertDisposition("README.md", CullDecisionDocumentation, "documentation")
+	assertDisposition("auth_test.go", CullDecisionTestOnly, "test or fixture")
+	assertDisposition("weak.go", CullDecisionNeedsEvidence, "needs corroboration")
+	assertDisposition("config.go", CullDecisionAlternates, "budget remains")
+	assertDisposition("config_copy.go", CullDecisionDuplicate, "same evidence surface")
+	assertDisposition("notes.go", CullDecisionLowSignal, "low score")
+}
+
 func TestBuildCullLedgerBucketsRows(t *testing.T) {
 	report := Report{Repo: "/repo", Rows: []FileEvidence{
 		{Path: "auth.go", Score: 5, PathRisk: 5, ContentRisk: 5, EvidenceLayers: []string{"path-risk", "content-risk", "test-void"}},
@@ -866,6 +1080,40 @@ func TestBuildCullLedgerBucketsRows(t *testing.T) {
 		if bucket.Count > 0 && len(bucket.Examples) == 0 {
 			t.Fatalf("bucket missing examples: %#v", bucket)
 		}
+	}
+}
+
+func TestRowsWithCullDispositionsMarksPremiumOverflowAsAlternate(t *testing.T) {
+	var rows []FileEvidence
+	for i := 0; i < maxPremiumCullSeeds+1; i++ {
+		rows = append(rows, FileEvidence{
+			Path:           fmt.Sprintf("internal/pkg/file_%02d.go", i),
+			Score:          5,
+			SeedScore:      float64(maxPremiumCullSeeds + 1 - i),
+			ContentRisk:    5,
+			UnknownsRisk:   3,
+			EvidenceLayers: []string{"content-risk", "unknowns", "hotspot"},
+		})
+	}
+
+	withDispositions := rowsWithCullDispositions(rows)
+	kept := 0
+	overflow := 0
+	for _, row := range withDispositions {
+		switch row.CullDecision {
+		case CullDecisionKeptForPremium:
+			kept++
+		case CullDecisionAlternates:
+			overflow++
+			if !strings.Contains(row.CullReason, "beyond kept_for_premium cap") {
+				t.Fatalf("overflow reason = %q", row.CullReason)
+			}
+		default:
+			t.Fatalf("unexpected disposition for premium candidate %#v", row)
+		}
+	}
+	if kept != maxPremiumCullSeeds || overflow != 1 {
+		t.Fatalf("kept=%d overflow=%d, want kept=%d overflow=1", kept, overflow, maxPremiumCullSeeds)
 	}
 }
 
@@ -1176,6 +1424,19 @@ func TestRunReportHelpReturnsNil(t *testing.T) {
 	}
 }
 
+func TestRunVersionBuildReportsProvenance(t *testing.T) {
+	var stdout strings.Builder
+	if err := Run(context.Background(), []string{"version", "--build"}, &stdout, &strings.Builder{}); err != nil {
+		t.Fatalf("Run version --build error = %v", err)
+	}
+	got := stdout.String()
+	for _, want := range []string{"slither ", "module:", "modified:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("version --build missing %q: %s", want, got)
+		}
+	}
+}
+
 func TestRunReportCompletionReportsRowsAndRankedFiles(t *testing.T) {
 	setTempConfigDir(t)
 	tmp := t.TempDir()
@@ -1425,6 +1686,180 @@ func (node *Node) Walk() int {
 `
 	if score, reasons := unknownsRisk("internal/graph/node.go", recursiveMethod); score == 0 || !containsReasonPrefix(reasons, "unknowns:recursive_control_flow:") {
 		t.Fatalf("recursive receiver method should be recursion risk: score=%d reasons=%#v", score, reasons)
+	}
+}
+
+func TestEmbeddedPatternPrecisionFixtures(t *testing.T) {
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		text      string
+		want      []string
+		wantNot   []string
+		wantCount map[string]int
+	}{
+		{
+			name: "open redirect from request query",
+			text: `app.get("/login", (req, res) => {
+	res.redirect(req.query.next)
+})`,
+			want: []string{"open_redirect_request_target"},
+			wantNot: []string{
+				"idor_request_param_object_lookup",
+				"ssrf_user_controlled_url_fetch",
+			},
+		},
+		{
+			name: "prototype pollution request merge",
+			text: `app.post("/settings", (req, res) => {
+	const opts = Object.assign({}, defaults, req.body)
+	res.json(opts)
+})`,
+			want: []string{"prototype_pollution_request_merge"},
+			wantNot: []string{
+				"nosql_request_object_query",
+			},
+		},
+		{
+			name: "unsafe yaml load",
+			text: `def load_config(stream):
+	return yaml.load(stream)
+`,
+			want:    []string{"unsafe_yaml_load"},
+			wantNot: []string{"unsafe_python_deserialization"},
+		},
+		{
+			name: "safe yaml load",
+			text: `def load_config(stream):
+	return yaml.safe_load(stream)
+`,
+			wantNot: []string{"unsafe_yaml_load"},
+		},
+		{
+			name: "credential literal excludes placeholders",
+			text: `const apiKey = "YOUR_API_KEY"
+const password = "YOUR_PASSWORD"
+`,
+			wantNot: []string{"credential_assignment_literal"},
+		},
+		{
+			name: "credential literal flags plausible secret",
+			text: `const apiKey = "YOUR_API_KEY"
+`,
+			want: []string{"credential_assignment_literal"},
+		},
+		{
+			name:      "max matches caps repeated token literals",
+			text:      strings.Repeat("YOUR_API_KEY\n", 8),
+			want:      []string{"provider_token_literal"},
+			wantCount: map[string]int{"provider_token_literal": 5},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := contentPatternMatchCounts(patterns, tt.text)
+			for _, id := range tt.want {
+				if got[id] == 0 {
+					t.Fatalf("pattern %q did not match; matches=%v", id, got)
+				}
+			}
+			for _, id := range tt.wantNot {
+				if got[id] != 0 {
+					t.Fatalf("pattern %q unexpectedly matched %d times; matches=%v", id, got[id], got)
+				}
+			}
+			for id, want := range tt.wantCount {
+				if got[id] != want {
+					t.Fatalf("pattern %q matched %d times, want %d; matches=%v", id, got[id], want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestContentRiskSkipsDocumentationProse(t *testing.T) {
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	score, reasons := contentRisk(patterns, "docs/detectors.md", `This fixture says Object.assign({}, defaults, req.body) and yaml.load(stream)
+should be matched only when test cases expect those detector ids.
+`)
+	if score != 0 || len(reasons) != 0 {
+		t.Fatalf("documentation prose should not run code-content detectors: score=%d reasons=%#v", score, reasons)
+	}
+}
+
+func TestContentRiskLocationsPreserveLineNumbersAfterDetectorLiteralFiltering(t *testing.T) {
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := "pattern(\"fixture\", `yaml.load(stream)`, 1, 1, \"content-risk\")\n" +
+		"const untouched = true\n" +
+		"func load(stream any) {\n" +
+		"\tyaml.load(stream)\n" +
+		"}\n"
+
+	score, reasons, locations := contentRiskWithLocations(patterns, "internal/app/loader.go", text)
+	if score == 0 {
+		t.Fatalf("expected content risk; reasons=%#v locations=%#v", reasons, locations)
+	}
+	for _, location := range locations {
+		if strings.HasPrefix(location.Reason, "content:unsafe_yaml_load:") {
+			if location.Line != 4 {
+				t.Fatalf("unsafe yaml line = %d, want 4; location=%#v", location.Line, location)
+			}
+			if location.Snippet != "yaml.load(stream)" {
+				t.Fatalf("unsafe yaml snippet = %q", location.Snippet)
+			}
+			return
+		}
+	}
+	t.Fatalf("unsafe yaml location not found; reasons=%#v locations=%#v", reasons, locations)
+}
+
+func contentPatternMatchCounts(patterns scoringPatterns, text string) map[string]int {
+	matches := contentPatternMatches(patterns, textWithoutDetectorLiterals(text))
+	counts := make(map[string]int, len(matches))
+	for _, match := range matches {
+		counts[match.pattern.ID] = match.count
+	}
+	return counts
+}
+
+func TestUnknownsEvidenceLocationsPointAtFirstConcreteLine(t *testing.T) {
+	text := `package demo
+
+import (
+	"database/sql"
+	"os"
+	"regexp"
+)
+
+func load() {
+	_ = os.Getenv("DISTILL_MODEL")
+	_ = regexp.MustCompile("x+")
+	_, _ = sql.Open("sqlite", "")
+}
+`
+	_, reasons := unknownsRisk("internal/demo.go", text)
+	locations := unknownsEvidenceLocations("internal/demo.go", text, reasons)
+	if len(locations) != 2 {
+		t.Fatalf("locations = %#v, want env and resource locations for reasons %#v", locations, reasons)
+	}
+	if locations[0].Reason != "unknowns:env_assumptions:1" || locations[0].Line != 10 || !strings.Contains(locations[0].Snippet, "os.Getenv") {
+		t.Fatalf("bad env location: %#v", locations[0])
+	}
+	if locations[1].Reason != "unknowns:resource_factory:2" || locations[1].Line != 11 || !strings.Contains(locations[1].Snippet, "regexp.MustCompile") {
+		t.Fatalf("bad resource location: %#v", locations[1])
 	}
 }
 
@@ -2033,6 +2468,24 @@ func findRow(report Report, path string) *FileEvidence {
 		}
 	}
 	return nil
+}
+
+func findPayloadRow(rows []FileEvidence, path string) *FileEvidence {
+	for i := range rows {
+		if rows[i].Path == path {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func markdownLineWithPrefix(markdown, prefix string) string {
+	for _, line := range strings.Split(markdown, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
 }
 
 func contains(items []string, want string) bool {

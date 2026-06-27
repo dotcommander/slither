@@ -248,37 +248,91 @@ func pathTermMatches(path, term string) bool {
 }
 
 func contentRisk(patterns scoringPatterns, rel, text string) (int, []string) {
+	score, reasons, _ := contentRiskWithLocations(patterns, rel, text)
+	return score, reasons
+}
+
+func contentRiskWithLocations(patterns scoringPatterns, rel, text string) (int, []string, []EvidenceLocation) {
 	if contentPatternSkipped(rel) {
-		return 0, nil
+		return 0, nil, nil
 	}
 	text = textWithoutDetectorLiterals(text)
 	score := 0
 	var reasons []string
-	for _, item := range patterns.ContentPatterns {
-		matches, err := countRegexp2Matches(item.Pattern, text, item.MaxMatches)
-		if err != nil || matches == 0 {
-			continue
-		}
-		score += matches * item.Weight
-		reasons = append(reasons, "content:"+item.ID+":"+itoa(matches))
+	var locations []EvidenceLocation
+	for _, match := range contentPatternMatches(patterns, text) {
+		score += match.count * match.pattern.Weight
+		reason := "content:" + match.pattern.ID + ":" + itoa(match.count)
+		reasons = append(reasons, reason)
+		locations = append(locations, EvidenceLocation{
+			Reason:  reason,
+			Line:    lineNumberAt(text, match.index),
+			Snippet: lineSnippetAt(text, match.index),
+		})
 	}
-	return score, reasons
+	return score, reasons, locations
 }
 
-func countRegexp2Matches(pattern *regexp2.Regexp, text string, maxMatches int) (int, error) {
+type contentPatternMatch struct {
+	pattern contentPattern
+	count   int
+	index   int
+}
+
+func contentPatternMatches(patterns scoringPatterns, text string) []contentPatternMatch {
+	matches := make([]contentPatternMatch, 0)
+	for _, item := range patterns.ContentPatterns {
+		count, index, err := countRegexp2Matches(item.Pattern, text, item.MaxMatches)
+		if err != nil || count == 0 {
+			continue
+		}
+		matches = append(matches, contentPatternMatch{pattern: item, count: count, index: index})
+	}
+	return matches
+}
+
+func countRegexp2Matches(pattern *regexp2.Regexp, text string, maxMatches int) (int, int, error) {
 	match, err := pattern.FindStringMatch(text)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	count := 0
+	firstIndex := 0
 	for match != nil && count < maxMatches {
+		if count == 0 {
+			firstIndex = match.Index
+		}
 		count++
 		match, err = pattern.FindNextMatch(match)
 		if err != nil {
-			return count, err
+			return count, firstIndex, err
 		}
 	}
-	return count, nil
+	return count, firstIndex, nil
+}
+
+func lineNumberAt(text string, index int) int {
+	if index < 0 {
+		return 0
+	}
+	if index > len(text) {
+		index = len(text)
+	}
+	return strings.Count(text[:index], "\n") + 1
+}
+
+func lineSnippetAt(text string, index int) string {
+	if index < 0 || index > len(text) {
+		return ""
+	}
+	start := strings.LastIndex(text[:index], "\n") + 1
+	end := strings.Index(text[index:], "\n")
+	if end < 0 {
+		end = len(text)
+	} else {
+		end += index
+	}
+	return strings.TrimSpace(text[start:end])
 }
 
 func contentPatternSkipped(rel string) bool {
@@ -351,6 +405,42 @@ func unknownsRisk(rel, text string) (int, []string) {
 		reasons = append(reasons, "unknowns:custom_infra:"+itoa(count))
 	}
 	return score, reasons
+}
+
+func unknownsEvidenceLocations(rel, text string, reasons []string) []EvidenceLocation {
+	if len(reasons) == 0 || !isArchitectureSource(rel) {
+		return nil
+	}
+	var locations []EvidenceLocation
+	for _, reason := range reasons {
+		pattern := unknownsReasonLocationPattern(reason)
+		if pattern == nil {
+			continue
+		}
+		match := pattern.FindStringIndex(text)
+		if match == nil {
+			continue
+		}
+		locations = append(locations, EvidenceLocation{
+			Reason:  reason,
+			Line:    lineNumberAt(text, match[0]),
+			Snippet: lineSnippetAt(text, match[0]),
+		})
+	}
+	return locations
+}
+
+func unknownsReasonLocationPattern(reason string) *regexp.Regexp {
+	switch {
+	case strings.HasPrefix(reason, "unknowns:env_assumptions:"):
+		return regexp.MustCompile(`\bos\.(Getenv|LookupEnv)\s*\(`)
+	case strings.HasPrefix(reason, "unknowns:hardcoded_runtime_endpoint:"):
+		return regexp.MustCompile(`http://(?:127\.0\.0\.1|localhost|\[::1\])|:\d{4,5}/`)
+	case strings.HasPrefix(reason, "unknowns:resource_factory:"):
+		return regexp.MustCompile(`\b(NewClient|sql\.Open|http\.Client|regexp\.MustCompile)\s*\(`)
+	default:
+		return nil
+	}
 }
 
 func hasNestedLoop(text string) bool {

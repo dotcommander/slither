@@ -6,11 +6,28 @@ import (
 	"strings"
 )
 
-const maxPremiumCullSeeds = 24
+const (
+	maxPremiumCullSeeds = 24
+
+	cullReasonGenerated       = "generated, report, minified, or derived artifact"
+	cullReasonTestOnly        = "test or fixture separated from the production premium queue"
+	cullReasonDocumentation   = "documentation or guide separated from the production premium queue"
+	cullReasonDuplicatePrefix = "same evidence surface represented by stronger row "
+	cullReasonNeedsEvidence   = "lexical or single-lane evidence needs corroboration"
+	cullReasonAlternate       = "plausible next premium target if budget remains"
+	cullReasonLowSignal       = "low score or weak evidence intersection"
+	cullReasonPremiumKept     = "strong multi-layer seed"
+	cullReasonPremiumOverflow = "strong seed beyond kept_for_premium cap"
+)
 
 type cullCandidate struct {
+	index int
 	row   FileEvidence
-	entry CullEntry
+}
+
+type cullDisposition struct {
+	Decision CullDecision
+	Reason   string
 }
 
 func BuildCullLedger(report Report) CullLedger {
@@ -37,56 +54,76 @@ func BuildCullLedger(report Report) CullLedger {
 		Duplicate:      CullBucket{Examples: []CullEntry{}},
 		NeedsEvidence:  CullBucket{Examples: []CullEntry{}},
 	}
+	dispositions := classifyCullDispositions(report.Rows)
+	for i, disposition := range dispositions {
+		if disposition.Decision == CullDecisionKeptForPremium || disposition.Reason == cullReasonPremiumOverflow {
+			continue
+		}
+		addCullDisposition(&ledger, disposition.Decision, cullEntry(report.Rows[i], disposition.Reason))
+	}
+	addPremiumDispositionEntries(&ledger, report.Rows, dispositions)
+	return ledger
+}
+
+func classifyCullDispositions(rows []FileEvidence) []cullDisposition {
+	dispositions := make([]cullDisposition, len(rows))
 	seenSurfaces := map[string]string{}
 	var premiumCandidates []cullCandidate
-	for _, row := range report.Rows {
-		entry := cullEntry(row, "")
+	for i, row := range rows {
 		surfaceKey := cullSurfaceKey(row)
 		duplicateOf, isDuplicate := seenSurfaces[surfaceKey]
 		switch {
 		case isGeneratedOrReportPath(row.Path):
-			entry.Reason = "generated, report, minified, or derived artifact"
-			addCullEntry(&ledger.Generated, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionGenerated, Reason: cullReasonGenerated}
 		case isTestPath(row.Path):
-			entry.Reason = "test or fixture separated from the production premium queue"
-			addCullEntry(&ledger.TestOnly, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionTestOnly, Reason: cullReasonTestOnly}
 		case isDocumentationPath(row.Path):
-			entry.Reason = "documentation or guide separated from the production premium queue"
-			addCullEntry(&ledger.Documentation, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionDocumentation, Reason: cullReasonDocumentation}
 		case isDuplicate && row.Score < 4:
-			entry.Reason = "same evidence surface represented by stronger row " + duplicateOf
-			addCullEntry(&ledger.Duplicate, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionDuplicate, Reason: cullReasonDuplicatePrefix + duplicateOf}
 		case keepForPremium(row):
-			premiumCandidates = append(premiumCandidates, cullCandidate{row: row, entry: entry})
+			premiumCandidates = append(premiumCandidates, cullCandidate{index: i, row: row})
 			seenSurfaces[surfaceKey] = row.Path
 		case needsMoreEvidence(row):
-			entry.Reason = "lexical or single-lane evidence needs corroboration"
-			addCullEntry(&ledger.NeedsEvidence, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionNeedsEvidence, Reason: cullReasonNeedsEvidence}
 		case row.Score >= 3:
-			entry.Reason = "plausible next premium target if budget remains"
-			addCullEntry(&ledger.Alternates, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionAlternates, Reason: cullReasonAlternate}
 			seenSurfaces[surfaceKey] = row.Path
 		default:
-			entry.Reason = "low score or weak evidence intersection"
-			addCullEntry(&ledger.LowSignal, entry, 3)
+			dispositions[i] = cullDisposition{Decision: CullDecisionLowSignal, Reason: cullReasonLowSignal}
 		}
 	}
-	addPremiumCandidates(&ledger, premiumCandidates)
-	return ledger
+	applyPremiumCandidateCap(dispositions, premiumCandidates)
+	return dispositions
 }
 
-func addPremiumCandidates(ledger *CullLedger, candidates []cullCandidate) {
+func applyPremiumCandidateCap(dispositions []cullDisposition, candidates []cullCandidate) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return premiumCandidateLess(candidates[i].row, candidates[j].row)
 	})
 	for i, candidate := range candidates {
 		if i < maxPremiumCullSeeds {
-			candidate.entry.Reason = "strong multi-layer seed"
-			addCullEntry(&ledger.KeptForPremium, candidate.entry, 0)
+			dispositions[candidate.index] = cullDisposition{Decision: CullDecisionKeptForPremium, Reason: cullReasonPremiumKept}
 			continue
 		}
-		candidate.entry.Reason = "strong seed beyond kept_for_premium cap"
-		addCullEntry(&ledger.Alternates, candidate.entry, 3)
+		dispositions[candidate.index] = cullDisposition{Decision: CullDecisionAlternates, Reason: cullReasonPremiumOverflow}
+	}
+}
+
+func addPremiumDispositionEntries(ledger *CullLedger, rows []FileEvidence, dispositions []cullDisposition) {
+	var candidates []cullCandidate
+	for i, disposition := range dispositions {
+		if disposition.Decision != CullDecisionKeptForPremium && disposition.Reason != cullReasonPremiumOverflow {
+			continue
+		}
+		candidates = append(candidates, cullCandidate{index: i, row: rows[i]})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return premiumCandidateLess(candidates[i].row, candidates[j].row)
+	})
+	for _, candidate := range candidates {
+		disposition := dispositions[candidate.index]
+		addCullDisposition(ledger, disposition.Decision, cullEntry(candidate.row, disposition.Reason))
 	}
 }
 
@@ -134,6 +171,37 @@ func rowHighRiskRank(row FileEvidence) int {
 	return 0
 }
 
+func addCullDisposition(ledger *CullLedger, decision CullDecision, entry CullEntry) {
+	switch decision {
+	case CullDecisionKeptForPremium:
+		addCullEntry(&ledger.KeptForPremium, entry, 0)
+	case CullDecisionAlternates:
+		addCullEntry(&ledger.Alternates, entry, 3)
+	case CullDecisionGenerated:
+		addCullEntry(&ledger.Generated, entry, 3)
+	case CullDecisionDocumentation:
+		addCullEntry(&ledger.Documentation, entry, 3)
+	case CullDecisionTestOnly:
+		addCullEntry(&ledger.TestOnly, entry, 3)
+	case CullDecisionDuplicate:
+		addCullEntry(&ledger.Duplicate, entry, 3)
+	case CullDecisionNeedsEvidence:
+		addCullEntry(&ledger.NeedsEvidence, entry, 3)
+	default:
+		addCullEntry(&ledger.LowSignal, entry, 3)
+	}
+}
+
+func rowsWithCullDispositions(rows []FileEvidence) []FileEvidence {
+	out := make([]FileEvidence, len(rows))
+	copy(out, rows)
+	for i, disposition := range classifyCullDispositions(rows) {
+		out[i].CullDecision = disposition.Decision
+		out[i].CullReason = disposition.Reason
+	}
+	return out
+}
+
 func addCullEntry(bucket *CullBucket, entry CullEntry, maxExamples int) {
 	bucket.Count++
 	if maxExamples <= 0 || len(bucket.Examples) < maxExamples {
@@ -147,6 +215,7 @@ func cullEntry(row FileEvidence, reason string) CullEntry {
 		Score:                         row.Score,
 		EvidenceClass:                 row.EvidenceClass,
 		Confidence:                    row.Confidence,
+		Actionability:                 actionabilityForRow(row),
 		Caveat:                        row.Caveat,
 		VerifyCmd:                     row.VerifyCmd,
 		EvidenceLayers:                row.EvidenceLayers,
@@ -286,11 +355,19 @@ func isTestPath(path string) bool {
 }
 
 func cullSurfaceKey(row FileEvidence) string {
-	dir := filepath.Dir(filepath.ToSlash(row.Path))
+	path := filepath.ToSlash(row.Path)
+	dir := filepath.Dir(path)
 	layers := "none"
 	if len(row.EvidenceLayers) > 0 {
 		limit := min(len(row.EvidenceLayers), 2)
 		layers = strings.Join(row.EvidenceLayers[:limit], "+")
+	}
+	if dir == "." {
+		ext := filepath.Ext(path)
+		if ext == "" {
+			ext = filepath.Base(path)
+		}
+		return dir + "|" + ext + "|" + layers
 	}
 	return dir + "|" + layers
 }

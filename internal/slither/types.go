@@ -3,16 +3,16 @@ package slither
 import "time"
 
 type Options struct {
-	Repo      string
-	Out       string
-	Top       int
-	MaxBytes  int64
-	Days      int
-	Patterns  string
-	Model     string
-	BaseURL   string
-	APIKeyEnv string
-	Local     bool
+	Repo           string
+	Out            string
+	Top            int
+	MaxBytes       int64
+	Days           int
+	Patterns       string
+	Model          string
+	BaseURL        string
+	APIKeyEnv      string
+	Local          bool
 	JSON           bool
 	Cull           bool
 	FallbackModels []string
@@ -20,49 +20,92 @@ type Options struct {
 }
 
 type FileEvidence struct {
-	ID                     string   `json:"id,omitempty"`
-	Path                   string   `json:"path"`
-	EvidenceClass          string   `json:"evidence_class,omitempty"`
-	Confidence             string   `json:"confidence,omitempty"`
-	Caveat                 string   `json:"caveat,omitempty"`
-	VerifyCmd              string   `json:"verify_cmd,omitempty"`
-	OmittedReason          string   `json:"omitted_reason,omitempty"`
-	Bytes                  int64    `json:"bytes"`
-	Lines                  int      `json:"lines"`
-	Score                  int      `json:"score"`
-	SeedScore              float64  `json:"seed_score"`
-	Churn                  int      `json:"churn"`
-	FixTouches             int      `json:"fix_touches"`
-	Markers                int      `json:"markers"`
-	Imports                int      `json:"imports"`
-	IncomingRefs           int      `json:"incoming_refs"`
-	SmellRisk              int      `json:"smell_risk"`
-	HotspotRisk            int      `json:"hotspot_risk"`
-	SDKDXRisk              int      `json:"sdk_dx_risk"`
-	UnknownsRisk           int      `json:"unknowns_risk"`
-	EnvContractRisk        int      `json:"env_contract_risk"`
-	WorkflowSecurityRisk   int      `json:"workflow_security_risk"`
-	MigrationSafetyRisk    int      `json:"migration_safety_risk"`
-	ContainerBuildRisk     int      `json:"container_build_risk"`
-	KubernetesSecurityRisk int      `json:"kubernetes_security_risk"`
-	TerraformSecurityRisk  int      `json:"terraform_security_risk"`
-	OpenAPIContractRisk    int      `json:"openapi_contract_risk"`
-	CORSSecurityRisk       int      `json:"cors_security_risk"`
-	CookieSecurityRisk     int      `json:"cookie_security_risk"`
-	DependencyHealthRisk   int      `json:"dependency_health_risk"`
-	CentralityRisk         int      `json:"centrality_risk"`
-	CochangeRisk           int      `json:"cochange_risk"`
-	OwnershipRisk          int      `json:"ownership_risk"`
-	FlakeRisk              int      `json:"flake_risk"`
-	OracleRisk             int      `json:"oracle_risk"`
-	StaleMarkerRisk        int      `json:"stale_marker_risk"`
-	TestGap                bool     `json:"test_gap"`
-	PathRisk               int      `json:"path_risk"`
-	ContentRisk            int      `json:"content_risk"`
-	EvidenceLayers         []string `json:"evidence_layers,omitempty"`
-	Reasons                []string `json:"reasons"`
-	Summary                string   `json:"summary"`
-	Excerpt                string   `json:"excerpt,omitempty"`
+	ID                     string             `json:"id,omitempty"`
+	Path                   string             `json:"path"`
+	EvidenceClass          string             `json:"evidence_class,omitempty"`
+	Confidence             string             `json:"confidence,omitempty"`
+	Actionability          Actionability      `json:"actionability,omitempty"`
+	Caveat                 string             `json:"caveat,omitempty"`
+	VerifyCmd              string             `json:"verify_cmd,omitempty"`
+	OmittedReason          string             `json:"omitted_reason,omitempty"`
+	Bytes                  int64              `json:"bytes"`
+	Lines                  int                `json:"lines"`
+	Score                  int                `json:"score"`
+	SeedScore              float64            `json:"seed_score"`
+	Churn                  int                `json:"churn"`
+	FixTouches             int                `json:"fix_touches"`
+	Markers                int                `json:"markers"`
+	Imports                int                `json:"imports"`
+	IncomingRefs           int                `json:"incoming_refs"`
+	SmellRisk              int                `json:"smell_risk"`
+	HotspotRisk            int                `json:"hotspot_risk"`
+	SDKDXRisk              int                `json:"sdk_dx_risk"`
+	UnknownsRisk           int                `json:"unknowns_risk"`
+	EnvContractRisk        int                `json:"env_contract_risk"`
+	WorkflowSecurityRisk   int                `json:"workflow_security_risk"`
+	MigrationSafetyRisk    int                `json:"migration_safety_risk"`
+	ContainerBuildRisk     int                `json:"container_build_risk"`
+	KubernetesSecurityRisk int                `json:"kubernetes_security_risk"`
+	TerraformSecurityRisk  int                `json:"terraform_security_risk"`
+	OpenAPIContractRisk    int                `json:"openapi_contract_risk"`
+	CORSSecurityRisk       int                `json:"cors_security_risk"`
+	CookieSecurityRisk     int                `json:"cookie_security_risk"`
+	DependencyHealthRisk   int                `json:"dependency_health_risk"`
+	CentralityRisk         int                `json:"centrality_risk"`
+	CochangeRisk           int                `json:"cochange_risk"`
+	OwnershipRisk          int                `json:"ownership_risk"`
+	FlakeRisk              int                `json:"flake_risk"`
+	OracleRisk             int                `json:"oracle_risk"`
+	StaleMarkerRisk        int                `json:"stale_marker_risk"`
+	TestGap                bool               `json:"test_gap"`
+	PathRisk               int                `json:"path_risk"`
+	ContentRisk            int                `json:"content_risk"`
+	EvidenceLayers         []string           `json:"evidence_layers,omitempty"`
+	Reasons                []string           `json:"reasons"`
+	EvidenceLocations      []EvidenceLocation `json:"evidence_locations,omitempty"`
+	CullDecision           CullDecision       `json:"cull_decision,omitempty"`
+	CullReason             string             `json:"cull_reason,omitempty"`
+	Summary                string             `json:"summary"`
+	Excerpt                string             `json:"excerpt,omitempty"`
+}
+
+// Actionability is the deterministic next-action class for a row. It tells a
+// reader whether to treat the row as a likely defect, inspect it as a strong
+// review seed, handle dependency policy separately, verify context first, or
+// handle it as a hotspot signal.
+type Actionability string
+
+const (
+	ActionabilityLikelyDefect     Actionability = "likely_defect"
+	ActionabilityDependencyReview Actionability = "dependency_review"
+	ActionabilityVerifyFirst      Actionability = "verify_first"
+	ActionabilityInspect          Actionability = "inspect"
+	ActionabilityHotspot          Actionability = "hotspot"
+)
+
+// CullDecision is the row-level disposition assigned by the cheap-model cull
+// classifier. It mirrors the cull ledger bucket names so JSON consumers can
+// filter rows without reimplementing Slither's bucket policy.
+type CullDecision string
+
+const (
+	CullDecisionKeptForPremium CullDecision = "kept_for_premium"
+	CullDecisionAlternates     CullDecision = "alternates"
+	CullDecisionGenerated      CullDecision = "culled_generated_or_report"
+	CullDecisionDocumentation  CullDecision = "culled_documentation"
+	CullDecisionTestOnly       CullDecision = "culled_test_only"
+	CullDecisionLowSignal      CullDecision = "culled_low_signal"
+	CullDecisionDuplicate      CullDecision = "culled_duplicate_surface"
+	CullDecisionNeedsEvidence  CullDecision = "needs_more_evidence"
+)
+
+// EvidenceLocation points a detector reason at the first concrete source line
+// that triggered it. Reasons stay the stable machine key; locations make the
+// JSON report faster to validate by a human or follow-up agent.
+type EvidenceLocation struct {
+	Reason  string `json:"reason"`
+	Line    int    `json:"line"`
+	Snippet string `json:"snippet"`
 }
 
 type DiscoveryStats struct {
@@ -83,6 +126,7 @@ type Report struct {
 	Discovery      DiscoveryStats
 	Model          string
 	BaseURL        string
+	Build          BuildInfo
 	SkippedSignals []string
 	Rows           []FileEvidence
 	FirstReadQueue []ReviewQueue
@@ -123,15 +167,16 @@ type CullBucket struct {
 }
 
 type CullEntry struct {
-	Path                          string   `json:"path"`
-	Score                         int      `json:"score"`
-	EvidenceClass                 string   `json:"evidence_class,omitempty"`
-	Confidence                    string   `json:"confidence,omitempty"`
-	Caveat                        string   `json:"caveat,omitempty"`
-	VerifyCmd                     string   `json:"verify_cmd,omitempty"`
-	EvidenceLayers                []string `json:"evidence_layers,omitempty"`
-	StrongestEvidenceIntersection string   `json:"strongest_evidence_intersection,omitempty"`
-	Reason                        string   `json:"reason"`
+	Path                          string        `json:"path"`
+	Score                         int           `json:"score"`
+	EvidenceClass                 string        `json:"evidence_class,omitempty"`
+	Confidence                    string        `json:"confidence,omitempty"`
+	Actionability                 Actionability `json:"actionability,omitempty"`
+	Caveat                        string        `json:"caveat,omitempty"`
+	VerifyCmd                     string        `json:"verify_cmd,omitempty"`
+	EvidenceLayers                []string      `json:"evidence_layers,omitempty"`
+	StrongestEvidenceIntersection string        `json:"strongest_evidence_intersection,omitempty"`
+	Reason                        string        `json:"reason"`
 }
 
 type ReviewQueue struct {

@@ -25,6 +25,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	switch args[0] {
+	case "version":
+		printVersion(args[1:], stdout)
+		return nil
 	case "report":
 		return runReport(ctx, args[1:], stdout)
 	default:
@@ -37,6 +40,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintf(w, `slither - a cheap-model scout that creeps through every path
 
 Usage:
+  slither version [--build]
   slither report [repo] [--out %s] [--top %d] [--max-bytes %d] [--days %d]
   slither report [repo] --json --out slither-report.json
   slither report [repo] --cull --json --out slither-cull.json
@@ -49,6 +53,25 @@ Model scoring:
   If --model is omitted, slither uses deterministic fallback scoring.
   --local selects %s at %s unless overridden.
 `, defaultOut, defaultTop, defaultMaxBytes, defaultDays, cfg.BaseURL, cfg.Local.Model, cfg.Local.BaseURL)
+}
+
+func printVersion(args []string, w io.Writer) {
+	info := CurrentBuildInfo()
+	if len(args) > 0 && args[0] == "--build" {
+		fmt.Fprintf(w, "slither %s\n", info.Summary())
+		if info.Module != "" {
+			fmt.Fprintf(w, "module: %s\n", info.Module)
+		}
+		if info.Revision != "" {
+			fmt.Fprintf(w, "revision: %s\n", info.Revision)
+		}
+		if info.GoVersion != "" {
+			fmt.Fprintf(w, "go: %s\n", info.GoVersion)
+		}
+		fmt.Fprintf(w, "modified: %t\n", info.Modified)
+		return
+	}
+	fmt.Fprintf(w, "slither %s\n", info.Version)
 }
 
 func normalizeReportArgs(args []string) []string {

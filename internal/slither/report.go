@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const maxDetailedMarkdownRows = 80
+
 func RenderMarkdown(report Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Slither Report\n\n")
@@ -16,6 +18,9 @@ func RenderMarkdown(report Report) string {
 	fmt.Fprintf(&b, "- Days: `%d`\n", report.Days)
 	fmt.Fprintf(&b, "- Patterns source: `%s`\n", report.PatternsSource)
 	fmt.Fprintf(&b, "- Files seen: `%d`\n", report.FilesSeen)
+	if report.Build.Version != "" || report.Build.Revision != "" || report.Build.GoVersion != "" {
+		fmt.Fprintf(&b, "- Slither build: `%s`\n", report.Build.Summary())
+	}
 	if report.Discovery.Source != "" {
 		fmt.Fprintf(&b, "- Discovery: source `%s`, candidates `%d`, git tracked `%d`, git untracked `%d`, filesystem files `%d`\n", report.Discovery.Source, report.Discovery.CandidateFiles, report.Discovery.GitTracked, report.Discovery.GitUntracked, report.Discovery.FilesystemFiles)
 	}
@@ -40,16 +45,17 @@ func RenderMarkdown(report Report) string {
 	if len(rankedRows) < len(report.Rows) {
 		fmt.Fprintf(&b, "Generated/support, documentation, test/fixture, duplicate-surface, needs-more-evidence, low-signal, and weak-score rows are omitted here; separated rows appear below, and `--json` retains all reported evidence rows.\n\n")
 	}
-	fmt.Fprintf(&b, "| rank | file | score | confidence | evidence | review command | top signals | note |\n")
-	fmt.Fprintf(&b, "| ---: | --- | ---: | --- | --- | --- | --- | --- |\n")
+	fmt.Fprintf(&b, "| rank | file | score | confidence | actionability | evidence | review command | top signals | note |\n")
+	fmt.Fprintf(&b, "| ---: | --- | ---: | --- | --- | --- | --- | --- | --- |\n")
 	for i, row := range rankedRows {
 		fmt.Fprintf(
 			&b,
-			"| %d | `%s` | %d | %s | %s | %s | %s | %s |\n",
+			"| %d | `%s` | %d | %s | %s | %s | %s | %s | %s |\n",
 			i+1,
 			row.Path,
 			row.Score,
 			cellOrDash(row.Confidence),
+			cellOrDash(string(actionabilityForRow(row))),
 			escapeCell(compactList(row.EvidenceLayers, 5)),
 			cellOrDash(row.VerifyCmd),
 			escapeCell(compactList(topReasons(row, 3), 3)),
@@ -128,16 +134,17 @@ func writeSeparatedRowsMarkdown(b *strings.Builder, title, intro string, rows []
 	}
 	fmt.Fprintf(b, "\n## %s\n\n", title)
 	fmt.Fprintf(b, "%s\n\n", intro)
-	fmt.Fprintf(b, "| rank | file | score | confidence | evidence | review command | top signals |\n")
-	fmt.Fprintf(b, "| ---: | --- | ---: | --- | --- | --- | --- |\n")
+	fmt.Fprintf(b, "| rank | file | score | confidence | actionability | evidence | review command | top signals |\n")
+	fmt.Fprintf(b, "| ---: | --- | ---: | --- | --- | --- | --- | --- |\n")
 	for i, row := range rows {
 		fmt.Fprintf(
 			b,
-			"| %d | `%s` | %d | %s | %s | %s | %s |\n",
+			"| %d | `%s` | %d | %s | %s | %s | %s | %s |\n",
 			i+1,
 			row.Path,
 			row.Score,
 			cellOrDash(row.Confidence),
+			cellOrDash(string(actionabilityForRow(row))),
 			escapeCell(compactList(row.EvidenceLayers, 5)),
 			cellOrDash(row.VerifyCmd),
 			escapeCell(compactList(topReasons(row, 3), 3)),
@@ -162,6 +169,9 @@ func writeExecutiveTriageMarkdown(b *strings.Builder, report Report) {
 	fmt.Fprintf(b, "- History-backed rows: `%d`; import-graph-backed rows: `%d`; deterministic-only rows: `%d`\n", stats.HistoryBacked, stats.ImportGraphBacked, stats.HeuristicOnly)
 	if len(stats.TopLayers) > 0 {
 		fmt.Fprintf(b, "- Dominant discriminating evidence layers: `%s`\n", strings.Join(stats.TopLayers, "`, `"))
+	}
+	if counts := actionabilityCounts(report.Rows); len(counts) > 0 {
+		fmt.Fprintf(b, "- Actionability: `%s`\n", strings.Join(counts, "`, `"))
 	}
 	if len(report.ReviewPlan) > 0 {
 		fmt.Fprintf(b, "- Review lanes: `%s`\n", strings.Join(reviewLaneNames(report.ReviewPlan), "`, `"))
@@ -278,11 +288,51 @@ func startHere(rows []FileEvidence) string {
 		startRows = rows
 	}
 	row := startRows[0]
-	signals := compactList(topReasons(row, 3), 3)
+	signals := compactList(topSignalLabels(row, 3), 3)
 	if signals == "" {
 		signals = compactList(row.EvidenceLayers, 3)
 	}
 	return fmt.Sprintf("`%s` (score `%d`, %s)", row.Path, row.Score, escapeCell(signals))
+}
+
+func topSignalLabels(row FileEvidence, limit int) []string {
+	var labels []string
+	add := func(label string) {
+		if !stringSliceContains(labels, label) {
+			labels = append(labels, label)
+		}
+	}
+	for _, reason := range topReasons(row, len(row.Reasons)) {
+		switch {
+		case strings.HasPrefix(reason, "cochange:bugfix_overlap"), strings.HasPrefix(reason, "bugfix_touches:"):
+			add("bug-fix history")
+		case strings.HasPrefix(reason, "hotspot:"):
+			add("hotspot complexity")
+		case strings.HasPrefix(reason, "ownership:"):
+			add("concentrated ownership")
+		case strings.HasPrefix(reason, "content:rate_limit_boundary"):
+			add("rate-limit boundary")
+		case strings.HasPrefix(reason, "content:resource_factory"):
+			add("resource lifecycle")
+		case strings.HasPrefix(reason, "content:reliability_policy_boundary"):
+			add("reliability boundary")
+		case strings.HasPrefix(reason, "content:audit_correctness_drift_metric"):
+			add("correctness metric")
+		case strings.HasPrefix(reason, "dependency_health:"):
+			add("dependency policy")
+		case strings.HasPrefix(reason, "path:"):
+			add("sensitive path")
+		case strings.HasPrefix(reason, "unknowns:"):
+			add("needs invariant review")
+		}
+		if len(labels) == limit {
+			return labels
+		}
+	}
+	if len(labels) > 0 {
+		return labels
+	}
+	return topReasons(row, limit)
 }
 
 func reviewLaneNames(plan []ReviewLane) []string {
@@ -293,19 +343,46 @@ func reviewLaneNames(plan []ReviewLane) []string {
 	return names
 }
 
+func actionabilityCounts(rows []FileEvidence) []string {
+	counts := map[Actionability]int{}
+	for _, row := range rows {
+		counts[actionabilityForRow(row)]++
+	}
+	order := []Actionability{
+		ActionabilityLikelyDefect,
+		ActionabilityDependencyReview,
+		ActionabilityInspect,
+		ActionabilityHotspot,
+		ActionabilityVerifyFirst,
+	}
+	out := make([]string, 0, len(order))
+	for _, actionability := range order {
+		if counts[actionability] > 0 {
+			out = append(out, fmt.Sprintf("%s:%d", actionability, counts[actionability]))
+		}
+	}
+	return out
+}
+
 func writeDetailedSignalsMarkdown(b *strings.Builder, rows []FileEvidence) {
 	fmt.Fprintf(b, "\n## Detailed Signals\n\n")
-	fmt.Fprintf(b, "Raw per-risk fields remain available in `--json` output; this table keeps the Markdown reviewable.\n\n")
-	fmt.Fprintf(b, "| rank | file | seed_score | class | churn | fix_touches | lines | key risk fields | test_gap | reasons |\n")
-	fmt.Fprintf(b, "| ---: | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- |\n")
+	if len(rows) > maxDetailedMarkdownRows {
+		fmt.Fprintf(b, "Showing the first `%d` of `%d` rows; full per-risk fields remain available in `--json` output.\n\n", maxDetailedMarkdownRows, len(rows))
+		rows = rows[:maxDetailedMarkdownRows]
+	} else {
+		fmt.Fprintf(b, "Raw per-risk fields remain available in `--json` output; this table keeps the Markdown reviewable.\n\n")
+	}
+	fmt.Fprintf(b, "| rank | file | seed_score | class | actionability | churn | fix_touches | lines | key risk fields | test_gap | reasons |\n")
+	fmt.Fprintf(b, "| ---: | --- | ---: | --- | --- | ---: | ---: | ---: | --- | --- | --- |\n")
 	for i, row := range rows {
 		fmt.Fprintf(
 			b,
-			"| %d | `%s` | %.2f | %s | %d | %d | %d | %s | %t | %s |\n",
+			"| %d | `%s` | %.2f | %s | %s | %d | %d | %d | %s | %t | %s |\n",
 			i+1,
 			row.Path,
 			row.SeedScore,
 			cellOrDash(row.EvidenceClass),
+			cellOrDash(string(actionabilityForRow(row))),
 			row.Churn,
 			row.FixTouches,
 			row.Lines,
@@ -393,12 +470,17 @@ func rowNote(row FileEvidence) string {
 }
 
 func RenderJSON(report Report) ([]byte, error) {
+	rows := report.Rows
+	if report.CullLedger != nil {
+		rows = rowsWithCullDispositions(rows)
+	}
 	payload := reportEnvelope{
 		RunLabel:       "slither_report",
 		Repo:           report.Repo,
 		GeneratedAt:    report.GeneratedAt,
 		Days:           report.Days,
 		PatternsSource: report.PatternsSource,
+		Build:          report.Build,
 		FilesSeen:      report.FilesSeen,
 		FilesReported:  len(report.Rows),
 		RowCount:       len(report.Rows),
@@ -406,7 +488,7 @@ func RenderJSON(report Report) ([]byte, error) {
 		Model:          report.Model,
 		BaseURL:        report.BaseURL,
 		SkippedSignals: report.SkippedSignals,
-		Rows:           report.Rows,
+		Rows:           rows,
 		FirstReadQueue: report.FirstReadQueue,
 		ReviewPlan:     report.ReviewPlan,
 		CullLedger:     report.CullLedger,
@@ -421,6 +503,7 @@ type reportEnvelope struct {
 	GeneratedAt    time.Time      `json:"generated_at"`
 	Days           int            `json:"days"`
 	PatternsSource string         `json:"patterns_source"`
+	Build          BuildInfo      `json:"build,omitempty"`
 	FilesSeen      int            `json:"files_seen"`
 	FilesReported  int            `json:"files_reported"`
 	RowCount       int            `json:"row_count"`
@@ -489,15 +572,16 @@ func writeCullBucketMarkdown(b *strings.Builder, name string, bucket CullBucket)
 	if len(bucket.Examples) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "| file | score | confidence | verify | strongest_evidence_intersection | reason |\n")
-	fmt.Fprintf(b, "| --- | ---: | --- | --- | --- | --- |\n")
+	fmt.Fprintf(b, "| file | score | confidence | actionability | verify | strongest_evidence_intersection | reason |\n")
+	fmt.Fprintf(b, "| --- | ---: | --- | --- | --- | --- | --- |\n")
 	for _, entry := range bucket.Examples {
 		fmt.Fprintf(
 			b,
-			"| `%s` | %d | %s | %s | %s | %s |\n",
+			"| `%s` | %d | %s | %s | %s | %s | %s |\n",
 			entry.Path,
 			entry.Score,
 			cellOrDash(entry.Confidence),
+			cellOrDash(string(entry.Actionability)),
 			cellOrDash(entry.VerifyCmd),
 			escapeCell(entry.StrongestEvidenceIntersection),
 			escapeCell(entry.Reason),

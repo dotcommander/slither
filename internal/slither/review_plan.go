@@ -66,6 +66,7 @@ func finalizeEvidenceMetadata(repo string, row *FileEvidence) {
 	row.ID = "slither:file:" + slug(row.Path)
 	row.EvidenceClass = evidenceClassForRow(*row)
 	row.Confidence = confidenceForRow(*row)
+	row.Actionability = actionabilityForRow(*row)
 	row.Caveat = caveatForRow(*row)
 	row.VerifyCmd = verifyCmdForPathInRepo(repo, row.Path)
 	if row.Excerpt != "" && int64(len(row.Excerpt)) < row.Bytes {
@@ -185,6 +186,99 @@ func boolScore(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func actionabilityForRow(row FileEvidence) Actionability {
+	if row.Actionability != "" {
+		return row.Actionability
+	}
+	if isGeneratedOrReportPath(row.Path) ||
+		isDocumentationPath(row.Path) ||
+		isTestOnlyCull(row) ||
+		isDetectorFixtureRow(row) ||
+		stringSliceContains(row.EvidenceLayers, "low-signal") ||
+		stringSliceContains(row.EvidenceLayers, "model-error") ||
+		(needsMoreEvidence(row) && !keepForPremium(row)) {
+		return ActionabilityVerifyFirst
+	}
+	if row.DependencyHealthRisk > 0 {
+		return ActionabilityDependencyReview
+	}
+	if likelyDefectRow(row) {
+		return ActionabilityLikelyDefect
+	}
+	if row.Score < 3 {
+		if rowHasHotspotActionabilitySignal(row) {
+			return ActionabilityHotspot
+		}
+		return ActionabilityVerifyFirst
+	}
+	if keepForPremium(row) || row.Score >= 4 || evidenceIntersectionCount(row) >= 2 {
+		return ActionabilityInspect
+	}
+	if rowHasHotspotActionabilitySignal(row) {
+		return ActionabilityHotspot
+	}
+	return ActionabilityVerifyFirst
+}
+
+func likelyDefectRow(row FileEvidence) bool {
+	if row.Score < 4 || evidenceIntersectionCount(row) < 2 {
+		return false
+	}
+	if rowHasLikelyDefectSignal(row) {
+		return true
+	}
+	for _, reason := range row.Reasons {
+		if highRiskContentReason(reason) {
+			return true
+		}
+	}
+	return false
+}
+
+func rowHasHotspotActionabilitySignal(row FileEvidence) bool {
+	return row.HotspotRisk > 0 || row.CentralityRisk > 0 || row.CochangeRisk > 0 || row.OwnershipRisk > 0 || row.SmellRisk > 0
+}
+
+func rowHasLikelyDefectSignal(row FileEvidence) bool {
+	return row.WorkflowSecurityRisk > 0 ||
+		row.MigrationSafetyRisk > 0 ||
+		row.ContainerBuildRisk > 0 ||
+		row.KubernetesSecurityRisk > 0 ||
+		row.TerraformSecurityRisk > 0 ||
+		row.OpenAPIContractRisk > 0 ||
+		row.CORSSecurityRisk > 0 ||
+		row.CookieSecurityRisk > 0 ||
+		row.FlakeRisk > 0 ||
+		row.OracleRisk > 0 ||
+		row.StaleMarkerRisk > 0
+}
+
+func highRiskContentReason(reason string) bool {
+	for _, prefix := range []string{
+		"content:open_redirect_",
+		"content:csrf_",
+		"content:idor_",
+		"content:mass_assignment_",
+		"content:nosql_",
+		"content:ssrf_",
+		"content:unsafe_",
+		"content:xxe_",
+		"content:prototype_pollution_",
+		"content:graphql_schema_",
+		"content:websocket_allow_all_",
+		"content:path_traversal_",
+		"content:upload_user_filename_",
+		"content:hardcoded_private_key",
+		"content:provider_token_literal",
+		"content:credential_assignment_literal",
+	} {
+		if strings.HasPrefix(reason, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func includeInReviewPlan(row FileEvidence) bool {
@@ -382,6 +476,9 @@ func strongDeterministicConfidence(row FileEvidence) bool {
 }
 
 func caveatForRow(row FileEvidence) string {
+	if isDetectorFixtureRow(row) {
+		return "test file contains multiple detector-like snippets; treat content/security hits as fixture or coverage evidence before product risk"
+	}
 	if stringSliceContains(row.EvidenceLayers, "model-error") {
 		return "model scoring failed; deterministic fallback evidence retained"
 	}
@@ -394,12 +491,29 @@ func caveatForRow(row FileEvidence) string {
 	return ""
 }
 
+func isDetectorFixtureRow(row FileEvidence) bool {
+	return isTestPath(row.Path) && contentDetectorReasonCount(row) >= 3
+}
+
+func contentDetectorReasonCount(row FileEvidence) int {
+	count := 0
+	for _, reason := range row.Reasons {
+		if strings.HasPrefix(reason, "content:") {
+			count++
+		}
+	}
+	return count
+}
+
 func verifyCmdForPath(path string) string {
 	return verifyCmdForPathInRepo("", path)
 }
 
 func verifyCmdForPathInRepo(repo, path string) string {
 	rel := filepath.ToSlash(path)
+	if isGeneratedOrReportPath(rel) {
+		return ""
+	}
 	if cmd := commandDocsVerifyCmd(repo, rel); cmd != "" {
 		return cmd
 	}

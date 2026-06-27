@@ -64,7 +64,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if opts.Model != "" {
 		baseURL = opts.BaseURL
 	}
-	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, SkippedSignals: skippedSignals}
+	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals}
 	// Pre-rank deterministically and only spend model calls on the top band:
 	// rows ranked well below --top keep their deterministic score, so the
 	// reported set is preserved without paying to score files that get
@@ -453,12 +453,13 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	var reasons []string
 	e.PathRisk, reasons = pathRisk(scoreCtx.patterns, e.Path)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.ContentRisk, reasons = contentRisk(scoreCtx.patterns, e.Path, text)
+	e.ContentRisk, reasons, e.EvidenceLocations = contentRiskWithLocations(scoreCtx.patterns, e.Path, text)
 	e.Reasons = append(e.Reasons, reasons...)
 	e.Imports, e.SmellRisk, reasons = architectureSmellRisk(text, e.Path, e.Lines)
 	e.Reasons = append(e.Reasons, reasons...)
 	e.UnknownsRisk, reasons = unknownsRisk(e.Path, text)
 	e.Reasons = append(e.Reasons, reasons...)
+	e.EvidenceLocations = append(e.EvidenceLocations, unknownsEvidenceLocations(e.Path, text, reasons)...)
 	envVars := envVarsInCode(e.Path, text)
 	e.EnvContractRisk, reasons = envContractRisk(envVars, scoreCtx.documentedEnv, e.Churn, e.FixTouches, e.PathRisk, e.ContentRisk, e.UnknownsRisk)
 	e.Reasons = append(e.Reasons, reasons...)
@@ -530,6 +531,7 @@ func textWithoutDetectorLiterals(text string) string {
 			strings.Contains(lower, "pattern(") ||
 			strings.Contains(lower, "regexp.mustcompile") ||
 			strings.Contains(line, "Term:") {
+			lines = append(lines, "")
 			continue
 		}
 		lines = append(lines, line)
