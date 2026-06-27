@@ -123,13 +123,29 @@ flags or editing source:
 
 The Markdown report leads with **Executive Triage** (confidence breakdown,
 review lanes, and a start-here pointer), then **Ranked Files** (a compact table
-of the top production files with confidence, evidence, review command, key
-signals, and a note), and finally **Detailed Signals** (per-file seed score,
-class, churn, and risk fields). Generated, documentation, and test/fixture
-files are omitted from the ranked queue and appear in separate **Documentation
-Rows** and **Test Risk Rows** sections when present; `--json` retains the full
-evidence set. Discovery counts, the pattern source, and skipped signals are
-included so missing evidence is visible rather than treated as low risk.
+of the top production files with confidence, actionability, evidence, review
+command, key signals, and a note), and finally **Detailed Signals** (per-file
+seed score, class, actionability, churn, and risk fields). Generated,
+documentation, and test/fixture files are omitted from the ranked queue and
+appear in separate **Documentation Rows** and **Test Risk Rows** sections when
+present; `--json` retains the full evidence set. Discovery counts, the pattern
+source, and skipped signals are included so missing evidence is visible rather
+than treated as low risk.
+
+### Actionability
+
+Each evidence row carries an `actionability` value in Markdown and JSON:
+
+| Value | Meaning |
+| --- | --- |
+| `likely_defect` | Start here when a high-risk deterministic signal is corroborated by another evidence layer. Treat it as a likely bug until review proves otherwise. |
+| `inspect` | Read the file as a strong review seed. The row has enough evidence to justify premium review, but Slither is not claiming a defect. |
+| `hotspot` | Review when you care about blast radius, churn, centrality, ownership, or code smell. Hotspot rows are prioritization evidence, not bug claims. |
+| `verify_first` | Check context before spending premium review. This covers generated/docs/test-only rows, detector fixtures, weak lexical evidence, model errors, and low-signal rows. |
+
+`actionability` is deterministic and derived from the row evidence. It is
+separate from `cull_decision`: culling decides which bucket a row belongs in;
+actionability describes how a reviewer should treat that row inside any bucket.
 
 ### JSON envelope (`--json`)
 
@@ -149,10 +165,10 @@ Markdown. Top-level fields:
 | `model` | string | Model ID used (omitted when empty). |
 | `base_url` | string | Model base URL (omitted when empty). |
 | `skipped_signals` | string[] | Signals skipped during scanning (omitted when empty). |
-| `rows` | object[] | Per-file evidence. Each row carries `id`, `path`, `evidence_class`, `confidence`, `score`, `reasons`, `summary`, plus per-file risk and count fields. |
+| `rows` | object[] | Per-file evidence. Each row carries `id`, `path`, `evidence_class`, `confidence`, `actionability`, `score`, `reasons`, `summary`, plus per-file risk and count fields. When `--cull` is enabled, each row also carries `cull_decision` and `cull_reason`, using the same bucket names as the cull ledger. |
 | `first_read_queue` | object[] | Files to read first; each entry has `id`, `group`, `lane`, `confidence`, `reasons`, `files`, `caveat` (omitted when empty). |
 | `review_plan` | object[] | Review lanes; each has `id`, `lane`, `group`, `files`, `gates`, `verify`, `why`, `confidence`, `caveat` (omitted when empty). |
-| `cull_ledger` | object | Cull ledger, present when culling is enabled via `--cull`: which files were kept, demoted to alternates, or culled, with bucketed reasons (omitted otherwise). |
+| `cull_ledger` | object | Cull ledger, present when culling is enabled via `--cull`: which files were kept, demoted to alternates, or culled, with bucketed reasons and `actionability` on examples (omitted otherwise). |
 
 ## Scan behavior
 
