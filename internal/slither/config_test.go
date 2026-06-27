@@ -72,6 +72,65 @@ func TestLoadOrCreateConfigLoadsExistingFile(t *testing.T) {
 	}
 }
 
+func TestWriteConfigReplacesExistingFileAtomically(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"model":"old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := defaultConfig()
+	cfg.Model = "new-model"
+	if err := writeConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model": "new-model"`) {
+		t.Fatalf("config was not replaced with new model: %s", data)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "config.json.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary config files left behind: %v", matches)
+	}
+}
+
+func TestAtomicWriteFilePreservesTargetContentsWhenReplaceFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(path, "keep")
+	if err := os.WriteFile(keep, []byte("still here"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := atomicWriteFile(path, []byte("replacement"), 0o644); err == nil {
+		t.Fatal("atomicWriteFile unexpectedly replaced a non-empty directory")
+	}
+	data, err := os.ReadFile(keep)
+	if err != nil {
+		t.Fatalf("existing target contents not preserved: %v", err)
+	}
+	if string(data) != "still here" {
+		t.Fatalf("existing target contents = %q, want preserved", data)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "config.json.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary config files left behind after failure: %v", matches)
+	}
+}
+
 func TestResolveReportOptionsFlagOverridesConfig(t *testing.T) {
 	t.Parallel()
 	cfg := Config{Model: "config-model", BaseURL: "https://config.test/v1", APIKeyEnv: "CONFIG_KEY"}

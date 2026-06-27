@@ -98,6 +98,29 @@ func TestLoadScoreCacheCorruptIgnored(t *testing.T) {
 	}
 }
 
+func TestLoadScoreCacheOversizedIgnored(t *testing.T) {
+	dir := setTempConfigDir(t) // NOT parallel
+	path := filepath.Join(dir, "slither", "cache", "scores.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(make([]byte, maxScoreCacheBytes+1)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cache := loadScoreCache()
+	if len(cache.entries) != 0 {
+		t.Fatalf("oversized cache not ignored: %v", cache.entries)
+	}
+}
+
 func TestScoreCachePrunesOverCapKeepingUsed(t *testing.T) {
 	t.Parallel()
 	c := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
@@ -180,5 +203,25 @@ func TestScoreCacheAllHitOverCapRewritesSmaller(t *testing.T) {
 	reloaded := loadScoreCache()
 	if len(reloaded.entries) > maxCacheEntries {
 		t.Fatalf("persisted entries = %d, want <= cap %d", len(reloaded.entries), maxCacheEntries)
+	}
+}
+
+func TestScoreCachePersistSkippedSignal(t *testing.T) {
+	t.Parallel()
+	if got := scoreCachePersistSkippedSignal(nil); got != "" {
+		t.Fatalf("nil cache signal = %q, want empty", got)
+	}
+	if got := scoreCachePersistSkippedSignal(&scoreCache{}); got != "" {
+		t.Fatalf("pathless cache signal = %q, want empty", got)
+	}
+
+	dir := t.TempDir()
+	cache := &scoreCache{
+		path:    dir,
+		entries: map[string]cachedScore{"k": {Score: 4}},
+		dirty:   map[string]cachedScore{"k": {Score: 4}},
+	}
+	if got := scoreCachePersistSkippedSignal(cache); got != "score_cache:persist_failed" {
+		t.Fatalf("failed persist signal = %q, want score_cache:persist_failed", got)
 	}
 }

@@ -160,7 +160,7 @@ func TestInspectFileSkipsDirectoryCandidates(t *testing.T) {
 func TestRenderMarkdownIncludesSnakeIdentity(t *testing.T) {
 	report := Report{Repo: "/repo", FilesSeen: 1, Build: BuildInfo{Version: "devel", Revision: "abcdef1234567890", GoVersion: "go1.26.0"}, Discovery: DiscoveryStats{Source: "git", GitTracked: 1, CandidateFiles: 1}, SkippedSignals: []string{"model_scoring:not_configured"}, Rows: []FileEvidence{{Path: "a.go", Score: 3, SeedScore: 1.5, EvidenceClass: "heuristic", Confidence: "low", EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}, Reasons: []string{"path:auth", "env_contract:missing"}, Summary: "sample"}}}
 	md := RenderMarkdown(report)
-	for _, want := range []string{"# Slither Report", "snake through", "Slither build:", "Discovery: source `git`", "Skipped signals", "## Executive Triage", "Confidence: high", "Actionability:", "## Ranked Files", "## Detailed Signals", "actionability", "seed_score", "env_contract_risk=3", "path-risk", "`a.go`"} {
+	for _, want := range []string{"# Slither Report", "snake through", "Slither build:", "Discovery: source `git`", "Skipped signals", "## Executive Triage", "Confidence: high", "Actionability in ranked production rows:", "## Ranked Files", "## Detailed Signals", "actionability", "seed_score", "env_contract_risk=3", "path-risk", "`a.go`"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}
@@ -173,6 +173,25 @@ func TestRenderMarkdownIncludesSnakeIdentity(t *testing.T) {
 	}
 	if start := markdownLineWithPrefix(md, "- Start with:"); strings.Contains(start, "path:") || strings.Contains(start, "content:") {
 		t.Fatalf("start-here summary should use human signal labels, not raw reason keys: %s", start)
+	}
+}
+
+func TestExecutiveActionabilityCountsRankedProductionRowsOnly(t *testing.T) {
+	report := Report{Repo: "/repo", Rows: []FileEvidence{
+		{Path: "internal/service.go", Score: 5, Confidence: "high", Actionability: ActionabilityInspect, ContentRisk: 5, CochangeRisk: 5, EvidenceLayers: []string{"content-risk", "cochange"}, Reasons: []string{"content:stateful_store:1"}},
+		{Path: "internal/service_copy.go", Score: 3, Confidence: "medium", Actionability: ActionabilityInspect, ContentRisk: 5, CochangeRisk: 5, EvidenceLayers: []string{"content-risk", "cochange"}, Reasons: []string{"content:stateful_store:1"}},
+		{Path: "README.md", Score: 5, Confidence: "low", Actionability: ActionabilityVerifyFirst, EvidenceLayers: []string{"path-risk"}, Reasons: []string{"path:readme"}},
+		{Path: "internal/service_test.go", Score: 5, Confidence: "low", Actionability: ActionabilityVerifyFirst, EvidenceLayers: []string{"content-risk"}, Reasons: []string{"content:background_context:1"}},
+	}}
+	md := RenderMarkdown(report)
+	line := markdownLineWithPrefix(md, "- Actionability in ranked production rows:")
+	if !strings.Contains(line, "inspect:1") {
+		t.Fatalf("actionability line = %q, want one ranked production inspect row", line)
+	}
+	for _, notWant := range []string{"inspect:2", "verify_first"} {
+		if strings.Contains(line, notWant) {
+			t.Fatalf("actionability line should not count separated or duplicate rows: %q", line)
+		}
 	}
 }
 
@@ -398,6 +417,22 @@ func TestCullSurfaceKeyKeepsRootFilesSeparatedByKind(t *testing.T) {
 	}
 	if cullSurfaceKey(configGo) != cullSurfaceKey(configCopyGo) {
 		t.Fatalf("same-kind root Go files should still share duplicate surface keys: %q vs %q", cullSurfaceKey(configGo), cullSurfaceKey(configCopyGo))
+	}
+}
+
+func TestCullSurfaceKeySeparatesPathRiskReasons(t *testing.T) {
+	config := FileEvidence{
+		Path:           "internal/slither/config.go",
+		EvidenceLayers: []string{"path-risk", "content-risk", "unknowns"},
+		Reasons:        []string{"path:config", "content:resource_factory:1"},
+	}
+	cache := FileEvidence{
+		Path:           "internal/slither/score_cache.go",
+		EvidenceLayers: []string{"path-risk", "content-risk", "cochange"},
+		Reasons:        []string{"path:cache", "content:resource_factory:1"},
+	}
+	if cullSurfaceKey(config) == cullSurfaceKey(cache) {
+		t.Fatalf("config and cache rows should not share duplicate surface key %q", cullSurfaceKey(config))
 	}
 }
 
@@ -947,6 +982,16 @@ func TestBuildReviewPlanUsesRepoNativeVerifyCommands(t *testing.T) {
 	if got := verifyCmdForPathInRepo(tmp, "docs/remote-eval-report.html"); got != "" {
 		t.Fatalf("generated report verify command = %q, want empty", got)
 	}
+	goRepo := t.TempDir()
+	writeFile(t, goRepo, "go.mod", "module example.test/slitherfixture\n")
+	writeFile(t, goRepo, "internal/config/defaults/config.yaml", "model: test\n")
+	writeFile(t, goRepo, "internal/config/config.go", "package config\n")
+	if got := verifyCmdForPathInRepo(goRepo, "internal/config/defaults/config.yaml"); got != "go test ./internal/config/..." {
+		t.Fatalf("go config verify command = %q", got)
+	}
+	if got := verifyCmdForPathInRepo(goRepo, "runs/run-label.sh"); got != "bash -n runs/run-label.sh" {
+		t.Fatalf("shell verify command = %q", got)
+	}
 
 	_, plan := BuildReviewPlanForRepo(tmp, []FileEvidence{{
 		Path:           "app/Services/SupermemoryClient.php",
@@ -1016,7 +1061,7 @@ func TestRenderJSONIncludesRowCullDispositionsWhenCullLedgerPresent(t *testing.T
 		{Path: "README.md", Score: 5, EvidenceLayers: []string{"path-risk"}},
 		{Path: "auth_test.go", Score: 3, EvidenceLayers: []string{"content-risk"}},
 		{Path: "weak.go", Score: 3, ContentRisk: 5, EvidenceLayers: []string{"content-risk"}},
-		{Path: "config.go", Score: 3, EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}},
+		{Path: "config.go", Score: 3, ContentRisk: 1, EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}},
 		{Path: "config_copy.go", Score: 2, EvidenceLayers: []string{"path-risk", "env-contract"}},
 		{Path: "notes.go", Score: 1, EvidenceLayers: []string{"low-signal"}},
 	}}
@@ -1034,7 +1079,7 @@ func TestRenderJSONIncludesRowCullDispositionsWhenCullLedgerPresent(t *testing.T
 		t.Fatal(err)
 	}
 
-	assertDisposition := func(path string, decision CullDecision, reasonPart string) {
+	assertDisposition := func(path string, decision CullDecision, actionability Actionability, reasonPart string) {
 		t.Helper()
 		row := findPayloadRow(payload.Rows, path)
 		if row == nil {
@@ -1043,19 +1088,36 @@ func TestRenderJSONIncludesRowCullDispositionsWhenCullLedgerPresent(t *testing.T
 		if row.CullDecision != decision {
 			t.Fatalf("%s cull_decision = %q, want %q", path, row.CullDecision, decision)
 		}
+		if row.Actionability != actionability {
+			t.Fatalf("%s actionability = %q, want %q", path, row.Actionability, actionability)
+		}
 		if !strings.Contains(row.CullReason, reasonPart) {
 			t.Fatalf("%s cull_reason = %q, want substring %q", path, row.CullReason, reasonPart)
 		}
 	}
 
-	assertDisposition("auth.go", CullDecisionKeptForPremium, "strong multi-layer seed")
-	assertDisposition("api/generated.pb.go", CullDecisionGenerated, "generated")
-	assertDisposition("README.md", CullDecisionDocumentation, "documentation")
-	assertDisposition("auth_test.go", CullDecisionTestOnly, "test or fixture")
-	assertDisposition("weak.go", CullDecisionNeedsEvidence, "needs corroboration")
-	assertDisposition("config.go", CullDecisionAlternates, "budget remains")
-	assertDisposition("config_copy.go", CullDecisionDuplicate, "same evidence surface")
-	assertDisposition("notes.go", CullDecisionLowSignal, "low score")
+	assertDisposition("auth.go", CullDecisionKeptForPremium, ActionabilityInspect, "strong multi-layer seed")
+	assertDisposition("api/generated.pb.go", CullDecisionGenerated, ActionabilityVerifyFirst, "generated")
+	assertDisposition("README.md", CullDecisionDocumentation, ActionabilityVerifyFirst, "documentation")
+	assertDisposition("auth_test.go", CullDecisionTestOnly, ActionabilityVerifyFirst, "test or fixture")
+	assertDisposition("weak.go", CullDecisionNeedsEvidence, ActionabilityVerifyFirst, "needs corroboration")
+	assertDisposition("config.go", CullDecisionAlternates, ActionabilityInspect, "budget remains")
+	assertDisposition("config_copy.go", CullDecisionDuplicate, ActionabilityVerifyFirst, "same evidence surface")
+	assertDisposition("notes.go", CullDecisionLowSignal, ActionabilityVerifyFirst, "low score")
+}
+
+func TestBuildCullLedgerDowngradesCulledExampleActionability(t *testing.T) {
+	report := Report{Repo: "/repo", Rows: []FileEvidence{
+		{Path: "internal/strong.go", Score: 5, Actionability: ActionabilityInspect, ContentRisk: 5, CochangeRisk: 5, EvidenceLayers: []string{"content-risk", "cochange"}},
+		{Path: "internal/duplicate.go", Score: 3, Actionability: ActionabilityInspect, ContentRisk: 5, EvidenceLayers: []string{"content-risk", "cochange"}},
+	}}
+	ledger := BuildCullLedger(report)
+	if len(ledger.Duplicate.Examples) != 1 {
+		t.Fatalf("duplicate examples = %#v, want one duplicate example", ledger.Duplicate.Examples)
+	}
+	if got := ledger.Duplicate.Examples[0].Actionability; got != ActionabilityVerifyFirst {
+		t.Fatalf("duplicate example actionability = %q, want %q", got, ActionabilityVerifyFirst)
+	}
 }
 
 func TestBuildCullLedgerBucketsRows(t *testing.T) {
@@ -1064,7 +1126,7 @@ func TestBuildCullLedgerBucketsRows(t *testing.T) {
 		{Path: "api/generated.pb.go", Score: 5, EvidenceLayers: []string{"content-risk"}},
 		{Path: "auth_test.go", Score: 3, EvidenceLayers: []string{"content-risk"}},
 		{Path: "weak.go", Score: 3, ContentRisk: 5, EvidenceLayers: []string{"content-risk"}},
-		{Path: "config.go", Score: 3, EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}},
+		{Path: "config.go", Score: 3, ContentRisk: 1, EnvContractRisk: 3, EvidenceLayers: []string{"path-risk", "env-contract"}},
 		{Path: "config_copy.go", Score: 2, EvidenceLayers: []string{"path-risk", "env-contract"}},
 		{Path: "notes.go", Score: 1, EvidenceLayers: []string{"low-signal"}},
 	}}
@@ -1079,6 +1141,23 @@ func TestBuildCullLedgerBucketsRows(t *testing.T) {
 	for _, bucket := range []CullBucket{ledger.KeptForPremium, ledger.Generated, ledger.TestOnly, ledger.NeedsEvidence, ledger.Alternates, ledger.Duplicate, ledger.LowSignal} {
 		if bucket.Count > 0 && len(bucket.Examples) == 0 {
 			t.Fatalf("bucket missing examples: %#v", bucket)
+		}
+	}
+}
+
+func TestRowsWithCullDispositionsDowngradesCulledActionability(t *testing.T) {
+	rows := []FileEvidence{
+		{Path: "internal/strong.go", Score: 5, Actionability: ActionabilityLikelyDefect, ContentRisk: 5, WorkflowSecurityRisk: 5, EvidenceLayers: []string{"content-risk", "workflow-security"}},
+		{Path: "internal/duplicate.go", Score: 3, Actionability: ActionabilityInspect, ContentRisk: 5, EvidenceLayers: []string{"content-risk", "workflow-security"}},
+		{Path: "internal/hot.go", Score: 1, Actionability: ActionabilityHotspot, HotspotRisk: 3, EvidenceLayers: []string{"hotspot"}},
+	}
+	withCull := rowsWithCullDispositions(rows)
+	if withCull[0].Actionability != ActionabilityLikelyDefect || withCull[0].CullDecision != CullDecisionKeptForPremium {
+		t.Fatalf("kept row = %#v, want intrinsic likely defect", withCull[0])
+	}
+	for _, row := range withCull[1:] {
+		if row.Actionability != ActionabilityVerifyFirst {
+			t.Fatalf("culled row actionability = %q for %#v, want verify_first", row.Actionability, row)
 		}
 	}
 }
@@ -1125,6 +1204,7 @@ func TestBuildCullLedgerDemotesGeneratedReportsAndHistoryOnlyTests(t *testing.T)
 		{Path: "prototypes/examples/variant-01/index.html", Score: 5, ContentRisk: 5, EvidenceLayers: []string{"content-risk", "size"}},
 		{Path: "stubs/agent.stub", Score: 5, ContentRisk: 5, EvidenceLayers: []string{"content-risk"}},
 		{Path: "database/.gitignore", Score: 5, PathRisk: 5, EvidenceLayers: []string{"path-risk"}},
+		{Path: "internal/slither/patterns/triage_patterns.json", Score: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"cochange", "ownership", "size"}},
 		{Path: "docs/archive/testing/removed-tldr-command/tldr_command_test.go.archive", Score: 5, ContentRisk: 5, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "ownership", "size", "churn"}},
 		{Path: "internal/actions/digest/digest_test.go", Score: 5, ContentRisk: 5, CochangeRisk: 7, OwnershipRisk: 7, EvidenceLayers: []string{"content-risk", "cochange", "ownership"}},
 		{Path: "internal/actions/flaky_test.go", Score: 5, ContentRisk: 5, FlakeRisk: 6, EvidenceLayers: []string{"content-risk", "flake-risk", "churn"}},
@@ -1135,8 +1215,8 @@ func TestBuildCullLedgerDemotesGeneratedReportsAndHistoryOnlyTests(t *testing.T)
 	if ledger.KeptForPremium.Count != 1 {
 		t.Fatalf("kept count = %d, want only source row kept: %#v", ledger.KeptForPremium.Count, ledger)
 	}
-	if ledger.Generated.Count != 5 {
-		t.Fatalf("generated count = %d, want docs HTML, data cache, prototype, stub, and gitignore artifacts generated bucket: %#v", ledger.Generated.Count, ledger)
+	if ledger.Generated.Count != 6 {
+		t.Fatalf("generated count = %d, want docs HTML, data cache, prototype, stub, gitignore, and pattern-catalog artifacts generated bucket: %#v", ledger.Generated.Count, ledger)
 	}
 	if ledger.Documentation.Count != 1 {
 		t.Fatalf("documentation count = %d, want docs archive bucket: %#v", ledger.Documentation.Count, ledger)
@@ -1322,6 +1402,7 @@ func TestRankedMarkdownRowsExcludeLowSignalCompletenessRows(t *testing.T) {
 		{Path: "config/auth.php", Score: 4, PathRisk: 8, ContentRisk: 8, EvidenceLayers: []string{"path-risk", "content-risk"}},
 		{Path: "internal/a.go", Score: 3, ContentRisk: 6, EvidenceLayers: []string{"content-risk", "sdk-dx"}},
 		{Path: "config/cache.php", Score: 2, PathRisk: 6, EvidenceLayers: []string{"path-risk"}},
+		{Path: "internal/slither/patterns/triage_patterns.json", Score: 5, CochangeRisk: 8, OwnershipRisk: 4, EvidenceLayers: []string{"cochange", "ownership", "size"}},
 		{Path: ".gitignore", Score: 1, EvidenceLayers: []string{"low-signal"}},
 		{Path: "artisan", Score: 1, EvidenceLayers: []string{"low-signal"}},
 	}
@@ -1329,8 +1410,11 @@ func TestRankedMarkdownRowsExcludeLowSignalCompletenessRows(t *testing.T) {
 	if !containsPath(ranked, "config/auth.php") || !containsPath(ranked, "internal/a.go") {
 		t.Fatalf("ranked rows = %#v, want premium keep and score-3 alternate rows", ranked)
 	}
-	if containsPath(ranked, "config/cache.php") || containsPath(ranked, ".gitignore") || containsPath(ranked, "artisan") {
-		t.Fatalf("ranked rows should exclude weak score-2 and low-signal rows: %#v", ranked)
+	if containsPath(ranked, "config/cache.php") ||
+		containsPath(ranked, "internal/slither/patterns/triage_patterns.json") ||
+		containsPath(ranked, ".gitignore") ||
+		containsPath(ranked, "artisan") {
+		t.Fatalf("ranked rows should exclude weak score-2, support-artifact, and low-signal rows: %#v", ranked)
 	}
 
 	selected := selectRowsForTop(rows, 80)
@@ -1355,6 +1439,9 @@ func TestSeedScoreDemotesGeneratedAndTestOnlyArtifacts(t *testing.T) {
 	}
 	if verifyCmdForPath("testdata/extraction/expected/chunk-006.json") != "go test ./..." {
 		t.Fatalf("testdata verify command = %q, want repo-level go test", verifyCmdForPath("testdata/extraction/expected/chunk-006.json"))
+	}
+	if got := verifyCmdForPath("internal/slither/patterns/triage_patterns.json"); got != "" {
+		t.Fatalf("pattern catalog verify command = %q, want empty generated/support command", got)
 	}
 	if got := verifyCmdForPath("migrations/001_initial_schema.sql"); got != `psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_initial_schema.sql` {
 		t.Fatalf("sql migration verify command = %q", got)
@@ -1599,6 +1686,35 @@ func hydrate(ids []string, db interface{ QueryContext(any, string, ...any) (any,
 	}
 }
 
+func TestErrorContextDroppedIgnoresWrappedFmtErrorf(t *testing.T) {
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrapped := `package scan
+
+func inspect(rel string, err error) error {
+	return fmt.Errorf("stat %s: %w", rel, err)
+}
+`
+	_, reasons := contentRisk(patterns, "internal/slither/scan.go", wrapped)
+	if containsReasonPrefix(reasons, "content:error_context_dropped:") {
+		t.Fatalf("wrapped %%w error should not be reported as dropped context: %#v", reasons)
+	}
+
+	unwrapped := `package scan
+
+func inspect(rel string, err error) error {
+	return fmt.Errorf("stat %s: %v", rel, err)
+}
+`
+	_, reasons = contentRisk(patterns, "internal/slither/scan.go", unwrapped)
+	if !containsReasonPrefix(reasons, "content:error_context_dropped:") {
+		t.Fatalf("unwrapped fmt.Errorf error should be reported: %#v", reasons)
+	}
+}
+
 func TestNestedLoopRiskRequiresActualNestedLoop(t *testing.T) {
 	separateLoops := `package config
 
@@ -1757,6 +1873,55 @@ const password = "YOUR_PASSWORD"
 			text:      strings.Repeat("YOUR_API_KEY\n", 8),
 			want:      []string{"provider_token_literal"},
 			wantCount: map[string]int{"provider_token_literal": 5},
+		},
+		{
+			name: "blocking inline worker ignores ordinary classify helper",
+			text: `func BuildCullLedger(report Report) {
+	dispositions := classifyCullDispositions(report.Rows)
+	_ = dispositions
+}
+`,
+			wantNot: []string{"blocking_inline_worker"},
+		},
+		{
+			name: "blocking inline worker keeps explicit content classifier",
+			text: `func score(text string) {
+	result := classifyContent(text)
+	_ = result
+}
+`,
+			want: []string{"blocking_inline_worker"},
+		},
+		{
+			name: "read all ignores bounded limit reader",
+			text: `func read(r io.Reader) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, maxBytes))
+}
+`,
+			wantNot: []string{"read_all_or_global_growth"},
+		},
+		{
+			name: "read all keeps unbounded reader",
+			text: `func read(r io.Reader) ([]byte, error) {
+	return io.ReadAll(r)
+}
+`,
+			want: []string{"read_all_or_global_growth"},
+		},
+		{
+			name: "read all ignores local decode map",
+			text: `func load(data []byte) error {
+	var entries map[string]cachedScore
+	return json.Unmarshal(data, &entries)
+}
+`,
+			wantNot: []string{"read_all_or_global_growth"},
+		},
+		{
+			name: "read all keeps package global map",
+			text: `var scoreCache map[string]cachedScore
+`,
+			want: []string{"read_all_or_global_growth"},
 		},
 	}
 
@@ -2318,6 +2483,34 @@ func headers() {
 	assertReasons("main.tf", "terraform_security:public_s3_acl:1", "terraform_security:s3_public_block_disabled:1")
 	assertReasons("openapi.yaml", "openapi_contract:anonymous_security:1", "openapi_contract:basic_auth_scheme")
 	assertReasons("server.go", "cors_security:reflected_origin:1", "cors_security:wildcard_methods:1", "cors_security:wildcard_headers:1", "cors_security:long_preflight_cache_with_broad_policy", "cookie_security:host_prefix_has_domain", "cookie_security:broad_domain_scope")
+}
+
+func TestBuildReportDoesNotTreatDetectorSourceAsCookieRisk(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "internal/slither/artifact_risk.go", `package slither
+
+func cookieSecurityRisk(text string) []string {
+	if regexpMust("(?i)(set-cookie|http\\.SetCookie|res\\.cookie)").FindStringIndex(text) == nil {
+		return nil
+	}
+	return []string{
+		"cookie_security:sensitive_cookie_missing_httponly",
+		"cookie_security:host_prefix_missing_secure",
+	}
+}
+`)
+
+	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 5, MaxBytes: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := findRow(report, "internal/slither/artifact_risk.go")
+	if row == nil {
+		t.Fatal("missing detector source row")
+	}
+	if row.CookieSecurityRisk != 0 || contains(row.EvidenceLayers, "cookie-security") {
+		t.Fatalf("detector source should not self-match cookie policy: %#v", row)
+	}
 }
 
 func TestBuildReportPopulatesDependencyAndSDKRefinements(t *testing.T) {
