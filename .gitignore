@@ -4,6 +4,11 @@
 # Scratch, audits, specs
 /.work/
 
+# Local agent instructions and runtime state
+/AGENTS.md
+/CLAUDE.md
+/.claude/
+
 # Generated reports
 slither-report.md
 *-report.md
