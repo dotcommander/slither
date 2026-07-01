@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -43,6 +45,16 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	paths, filterSignals, err := filterDiscoveredPaths(opts.Repo, paths, opts.Include, opts.Exclude)
+	if err != nil {
+		return Report{}, err
+	}
+	discovery.CandidateFiles = len(paths)
+	skippedSignals = append(skippedSignals, filterSignals...)
+	focusRE, err := compileFocus(opts.Focus)
+	if err != nil {
+		return Report{}, err
+	}
 	patterns, err := loadScoringPatterns(opts.Patterns)
 	if err != nil {
 		return Report{}, err
@@ -64,7 +76,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if opts.Model != "" {
 		baseURL = opts.BaseURL
 	}
-	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals}
+	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals, Filters: ReportFilters{Focus: opts.Focus, Include: opts.Include, Exclude: opts.Exclude, Inventory: opts.Inventory}}
 	// Pre-rank deterministically and only spend model calls on the top band:
 	// rows ranked well below --top keep their deterministic score, so the
 	// reported set is preserved without paying to score files that get
@@ -89,13 +101,161 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	for i := range rows {
 		evidence := rows[i]
 		finalizeEvidenceMetadata(opts.Repo, &evidence)
+		if !rowMatchesFocus(evidence, focusRE) || !rowMatchesInventory(evidence, opts.Inventory) {
+			continue
+		}
 		report.Rows = append(report.Rows, evidence)
 	}
 	sortReportRows(report.Rows)
 	report.Rows = selectRowsForTop(report.Rows, opts.Top)
 	report.FilesScored = len(report.Rows)
-	report.FirstReadQueue, report.ReviewPlan = BuildReviewPlanForRepo(opts.Repo, report.Rows)
+	if opts.Inventory == "data-integrity" {
+		report.FirstReadQueue, report.ReviewPlan = BuildDataIntegrityInventoryForRepo(opts.Repo, report.Rows)
+	} else {
+		report.FirstReadQueue, report.ReviewPlan = BuildReviewPlanForRepo(opts.Repo, report.Rows)
+	}
+	report.WhyTop = buildWhyTopEntries(report.Rows, opts.WhyTop)
 	return report, nil
+}
+
+func filterDiscoveredPaths(repo string, paths []string, include, exclude []string) ([]string, []string, error) {
+	if len(include) == 0 && len(exclude) == 0 {
+		return paths, nil, nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, candidate := range paths {
+		rel := filterRelPath(repo, candidate)
+		matchedInclude, err := pathMatchesAny(rel, include, len(include) == 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !matchedInclude {
+			continue
+		}
+		matchedExclude, err := pathMatchesAny(rel, exclude, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		if matchedExclude {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	var signals []string
+	if len(include) > 0 {
+		signals = append(signals, "filters:include:"+itoa(len(include)))
+	}
+	if len(exclude) > 0 {
+		signals = append(signals, "filters:exclude:"+itoa(len(exclude)))
+	}
+	if skipped := len(paths) - len(out); skipped > 0 {
+		signals = append(signals, "filters:paths_skipped:"+itoa(skipped))
+	}
+	return out, signals, nil
+}
+
+func filterRelPath(repo, candidate string) string {
+	if repo != "" {
+		if rel, err := filepath.Rel(repo, candidate); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(candidate)
+}
+
+func pathMatchesAny(rel string, patterns []string, emptyValue bool) (bool, error) {
+	if len(patterns) == 0 {
+		return emptyValue, nil
+	}
+	rel = filepath.ToSlash(rel)
+	for _, pattern := range patterns {
+		ok, err := pathPatternMatches(pattern, rel)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func pathPatternMatches(pattern, rel string) (bool, error) {
+	pattern = filepath.ToSlash(pattern)
+	if ok, err := path.Match(pattern, rel); err == nil && ok {
+		return true, nil
+	} else if err != nil && !strings.Contains(pattern, "**") {
+		return false, fmt.Errorf("invalid path pattern %q: %w", pattern, err)
+	}
+	if strings.Contains(pattern, "**") {
+		return doublestarPatternMatches(pattern, rel), nil
+	}
+	if !strings.ContainsAny(pattern, "*?[") {
+		return strings.Contains(rel, pattern), nil
+	}
+	return false, nil
+}
+
+func doublestarPatternMatches(pattern, rel string) bool {
+	if pattern == "**" || pattern == "**/*" {
+		return true
+	}
+	parts := strings.Split(pattern, "**")
+	if len(parts) != 2 {
+		return false
+	}
+	prefix, suffix := parts[0], parts[1]
+	if prefix != "" && !strings.HasPrefix(rel, strings.TrimSuffix(prefix, "/")) {
+		return false
+	}
+	if suffix == "" {
+		return true
+	}
+	suffix = strings.TrimPrefix(suffix, "/")
+	if suffix == "" {
+		return true
+	}
+	if strings.ContainsAny(suffix, "*?[") {
+		ok, _ := path.Match(suffix, path.Base(rel))
+		return ok || strings.HasSuffix(rel, strings.TrimPrefix(suffix, "*"))
+	}
+	return strings.HasSuffix(rel, suffix) || strings.Contains(rel, suffix)
+}
+
+func compileFocus(focus string) (*regexp.Regexp, error) {
+	if strings.TrimSpace(focus) == "" {
+		return nil, nil
+	}
+	re, err := regexp.Compile("(?i)" + focus)
+	if err != nil {
+		return nil, fmt.Errorf("compile --focus: %w", err)
+	}
+	return re, nil
+}
+
+func rowMatchesFocus(row FileEvidence, focus *regexp.Regexp) bool {
+	if focus == nil {
+		return true
+	}
+	haystack := strings.Join([]string{
+		row.Path,
+		row.Summary,
+		strings.Join(row.EvidenceLayers, " "),
+		strings.Join(row.Reasons, " "),
+		strings.Join(keyRiskFields(row), " "),
+	}, " ")
+	return focus.MatchString(haystack)
+}
+
+func rowMatchesInventory(row FileEvidence, inventory string) bool {
+	switch inventory {
+	case "":
+		return true
+	case "data-integrity":
+		return isDataIntegrityRow(row)
+	default:
+		return false
+	}
 }
 
 func selectRowsForTop(rows []FileEvidence, top int) []FileEvidence {

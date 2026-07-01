@@ -49,7 +49,7 @@ func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
 
 func TestBuildReportClassifiesContentSecretsAsSecretRisk(t *testing.T) {
 	tmp := t.TempDir()
-	writeFile(t, tmp, "main.go", "package main\n\nconst token = YOUR_API_KEY"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
+	writeFile(t, tmp, "main.go", "package main\n\nconst token = \"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
 
 	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 1000})
 	if err != nil {
@@ -233,8 +233,13 @@ func TestActionabilityClassifiesRows(t *testing.T) {
 		want Actionability
 	}{
 		{
-			name: "corroborated high risk",
+			name: "corroborated high-risk inspection",
 			row:  FileEvidence{Path: "internal/auth.go", Score: 5, ContentRisk: 5, WorkflowSecurityRisk: 5, EvidenceLayers: []string{"content-risk", "workflow-security"}, Reasons: []string{"workflow_security:unpinned_actions:1"}},
+			want: ActionabilityHighRiskInspect,
+		},
+		{
+			name: "corroborated likely defect",
+			row:  FileEvidence{Path: "internal/auth.go", Score: 5, ContentRisk: 5, WorkflowSecurityRisk: 5, EvidenceLayers: []string{"content-risk", "workflow-security"}, Reasons: []string{"content:ssrf_url_param:1", "workflow_security:unpinned_actions:1"}},
 			want: ActionabilityLikelyDefect,
 		},
 		{
@@ -298,6 +303,61 @@ func TestRenderJSONIncludesEvidenceLocations(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"evidence_locations"`) || !strings.Contains(string(data), `"line": 12`) {
 		t.Fatalf("json missing evidence locations:\n%s", data)
+	}
+}
+
+func TestBuildReportFiltersFocusIncludeExcludeAndWhyTop(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "internal/database/db.go", "package database\n\nfunc Query(){ panic(\"postgres pgx migration\") }\n")
+	writeFile(t, tmp, "internal/database/db_test.go", "package database\n\nfunc TestQuery() {}\n")
+	writeFile(t, tmp, "docs/notes.md", "postgres migration notes\n")
+	writeFile(t, tmp, "internal/http/server.go", "package http\n\nfunc Serve() {}\n")
+
+	report, err := BuildReport(context.Background(), Options{
+		Repo:     tmp,
+		Top:      10,
+		MaxBytes: 2000,
+		Focus:    "postgres|pgx|migration",
+		Include:  []string{"internal/**"},
+		Exclude:  []string{"**/*_test.go"},
+		WhyTop:   3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findRow(report, "internal/database/db.go") == nil {
+		t.Fatalf("focused database row missing: rows=%#v skipped=%#v", report.Rows, report.SkippedSignals)
+	}
+	for _, notWant := range []string{"internal/database/db_test.go", "docs/notes.md", "internal/http/server.go"} {
+		if findRow(report, notWant) != nil {
+			t.Fatalf("filtered row %q should not be present: %#v", notWant, report.Rows)
+		}
+	}
+	if len(report.WhyTop) != 1 || report.WhyTop[0].Path != "internal/database/db.go" {
+		t.Fatalf("why_top = %#v, want focused top row", report.WhyTop)
+	}
+	if report.Filters.Focus == "" || len(report.Filters.Include) != 1 || len(report.Filters.Exclude) != 1 {
+		t.Fatalf("filters not preserved in report: %#v", report.Filters)
+	}
+}
+
+func TestBuildReportInventoryDataIntegrityFiltersRows(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "migrations/001.sql", "DROP TABLE users;\n")
+	writeFile(t, tmp, "internal/http/server.go", "package http\n\nfunc Serve(){ panic(\"x\") }\n")
+
+	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 2000, Inventory: "data-integrity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findRow(report, "migrations/001.sql") == nil {
+		t.Fatalf("data-integrity migration missing: %#v", report.Rows)
+	}
+	if findRow(report, "internal/http/server.go") != nil {
+		t.Fatalf("non-data-integrity row should be filtered: %#v", report.Rows)
+	}
+	if !reviewPlanHasLane(report.ReviewPlan, "data-integrity") {
+		t.Fatalf("data-integrity inventory should retain lane grouping: %#v", report.ReviewPlan)
 	}
 }
 
@@ -1864,13 +1924,13 @@ const password = "YOUR_PASSWORD"
 		},
 		{
 			name: "credential literal flags plausible secret",
-			text: `const apiKey = "YOUR_API_KEY"
+			text: `const apiKey = "sk-aaaaaaaaaaaaaaaaaaaaaaaa"
 `,
 			want: []string{"credential_assignment_literal"},
 		},
 		{
 			name:      "max matches caps repeated token literals",
-			text:      strings.Repeat("YOUR_API_KEY\n", 8),
+			text:      strings.Repeat("sk-aaaaaaaaaaaaaaaaaaaaaaaa\n", 8),
 			want:      []string{"provider_token_literal"},
 			wantCount: map[string]int{"provider_token_literal": 5},
 		},

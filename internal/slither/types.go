@@ -9,6 +9,11 @@ type Options struct {
 	MaxBytes       int64
 	Days           int
 	Patterns       string
+	Focus          string
+	Include        []string
+	Exclude        []string
+	WhyTop         int
+	Inventory      string
 	Model          string
 	BaseURL        string
 	APIKeyEnv      string
@@ -70,13 +75,14 @@ type FileEvidence struct {
 }
 
 // Actionability is the deterministic next-action class for a row. It tells a
-// reader whether to treat the row as a likely defect, inspect it as a strong
-// review seed, handle dependency policy separately, verify context first, or
-// handle it as a hotspot signal.
+// reader whether to treat the row as a likely defect, inspect high-risk evidence
+// without assuming a defect, handle dependency policy separately, verify context
+// first, or handle it as a hotspot signal.
 type Actionability string
 
 const (
 	ActionabilityLikelyDefect     Actionability = "likely_defect"
+	ActionabilityHighRiskInspect  Actionability = "high_risk_inspect"
 	ActionabilityDependencyReview Actionability = "dependency_review"
 	ActionabilityVerifyFirst      Actionability = "verify_first"
 	ActionabilityInspect          Actionability = "inspect"
@@ -131,8 +137,30 @@ type Report struct {
 	Rows           []FileEvidence
 	FirstReadQueue []ReviewQueue
 	ReviewPlan     []ReviewLane
+	Filters        ReportFilters
+	WhyTop         []WhyTopEntry
+	FreshnessHint  string
 	CullLedger     *CullLedger
 	CacheStats     *CacheStats
+}
+
+type ReportFilters struct {
+	Focus     string   `json:"focus,omitempty"`
+	Include   []string `json:"include,omitempty"`
+	Exclude   []string `json:"exclude,omitempty"`
+	Inventory string   `json:"inventory,omitempty"`
+}
+
+type WhyTopEntry struct {
+	Rank          int           `json:"rank"`
+	Path          string        `json:"path"`
+	Score         int           `json:"score"`
+	Confidence    string        `json:"confidence,omitempty"`
+	Actionability Actionability `json:"actionability,omitempty"`
+	Evidence      []string      `json:"evidence,omitempty"`
+	Reasons       []string      `json:"reasons,omitempty"`
+	VerifyCmd     string        `json:"verify_cmd,omitempty"`
+	Note          string        `json:"note,omitempty"`
 }
 
 // CacheStats reports score-cache effectiveness for a run. Nil (omitted) when

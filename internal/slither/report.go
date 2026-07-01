@@ -24,6 +24,12 @@ func RenderMarkdown(report Report) string {
 	if report.Discovery.Source != "" {
 		fmt.Fprintf(&b, "- Discovery: source `%s`, candidates `%d`, git tracked `%d`, git untracked `%d`, filesystem files `%d`\n", report.Discovery.Source, report.Discovery.CandidateFiles, report.Discovery.GitTracked, report.Discovery.GitUntracked, report.Discovery.FilesystemFiles)
 	}
+	if filterSummary := reportFilterSummary(report.Filters); filterSummary != "" {
+		fmt.Fprintf(&b, "- Filters: %s\n", filterSummary)
+	}
+	if report.FreshnessHint != "" {
+		fmt.Fprintf(&b, "- Freshness: %s\n", report.FreshnessHint)
+	}
 	fmt.Fprintf(&b, "- Files reported: `%d`\n", len(report.Rows))
 	if report.Model == "" {
 		fmt.Fprintf(&b, "- Scoring: deterministic fallback\n\n")
@@ -37,6 +43,9 @@ func RenderMarkdown(report Report) string {
 		fmt.Fprintf(&b, "- Skipped signals: `%s`\n\n", strings.Join(report.SkippedSignals, "`, `"))
 	}
 	writeExecutiveTriageMarkdown(&b, report)
+	if len(report.WhyTop) > 0 {
+		writeWhyTopMarkdown(&b, report.WhyTop)
+	}
 	if report.CullLedger != nil {
 		writeCullLedgerMarkdown(&b, *report.CullLedger)
 	}
@@ -343,6 +352,23 @@ func reviewLaneNames(plan []ReviewLane) []string {
 	return names
 }
 
+func reportFilterSummary(filters ReportFilters) string {
+	var parts []string
+	if filters.Focus != "" {
+		parts = append(parts, "focus `"+escapeCell(filters.Focus)+"`")
+	}
+	if len(filters.Include) > 0 {
+		parts = append(parts, "include `"+escapeCell(strings.Join(filters.Include, "`, `"))+"`")
+	}
+	if len(filters.Exclude) > 0 {
+		parts = append(parts, "exclude `"+escapeCell(strings.Join(filters.Exclude, "`, `"))+"`")
+	}
+	if filters.Inventory != "" {
+		parts = append(parts, "inventory `"+escapeCell(filters.Inventory)+"`")
+	}
+	return strings.Join(parts, "; ")
+}
+
 func reviewableActionabilityRows(rows []FileEvidence) []FileEvidence {
 	return rankedMarkdownRows(rows)
 }
@@ -354,6 +380,7 @@ func actionabilityCounts(rows []FileEvidence) []string {
 	}
 	order := []Actionability{
 		ActionabilityLikelyDefect,
+		ActionabilityHighRiskInspect,
 		ActionabilityDependencyReview,
 		ActionabilityInspect,
 		ActionabilityHotspot,
@@ -473,6 +500,45 @@ func rowNote(row FileEvidence) string {
 	return "review deterministic signal"
 }
 
+func buildWhyTopEntries(rows []FileEvidence, limit int) []WhyTopEntry {
+	if limit <= 0 {
+		return nil
+	}
+	rankedRows := rankedMarkdownRows(rows)
+	if len(rankedRows) > limit {
+		rankedRows = rankedRows[:limit]
+	}
+	entries := make([]WhyTopEntry, 0, len(rankedRows))
+	for i, row := range rankedRows {
+		entries = append(entries, WhyTopEntry{
+			Rank:          i + 1,
+			Path:          row.Path,
+			Score:         row.Score,
+			Confidence:    row.Confidence,
+			Actionability: actionabilityForRow(row),
+			Evidence:      append([]string(nil), row.EvidenceLayers...),
+			Reasons:       topReasons(row, 5),
+			VerifyCmd:     row.VerifyCmd,
+			Note:          rowNote(row),
+		})
+	}
+	return entries
+}
+
+func writeWhyTopMarkdown(b *strings.Builder, entries []WhyTopEntry) {
+	fmt.Fprintf(b, "## Why Top %d\n\n", len(entries))
+	fmt.Fprintf(b, "| rank | file | why | verify |\n")
+	fmt.Fprintf(b, "| ---: | --- | --- | --- |\n")
+	for _, entry := range entries {
+		why := compactList(append(entry.Evidence, entry.Reasons...), 6)
+		if entry.Note != "" {
+			why = strings.TrimSpace(why + "; " + entry.Note)
+		}
+		fmt.Fprintf(b, "| %d | `%s` | %s | %s |\n", entry.Rank, entry.Path, escapeCell(why), cellOrDash(entry.VerifyCmd))
+	}
+	fmt.Fprintf(b, "\n")
+}
+
 func RenderJSON(report Report) ([]byte, error) {
 	rows := report.Rows
 	if report.CullLedger != nil {
@@ -492,7 +558,10 @@ func RenderJSON(report Report) ([]byte, error) {
 		Model:          report.Model,
 		BaseURL:        report.BaseURL,
 		SkippedSignals: report.SkippedSignals,
+		Filters:        report.Filters,
 		Rows:           rows,
+		WhyTop:         report.WhyTop,
+		FreshnessHint:  report.FreshnessHint,
 		FirstReadQueue: report.FirstReadQueue,
 		ReviewPlan:     report.ReviewPlan,
 		CullLedger:     report.CullLedger,
@@ -515,7 +584,10 @@ type reportEnvelope struct {
 	Model          string         `json:"model,omitempty"`
 	BaseURL        string         `json:"base_url,omitempty"`
 	SkippedSignals []string       `json:"skipped_signals,omitempty"`
+	Filters        ReportFilters  `json:"filters,omitempty"`
 	Rows           []FileEvidence `json:"rows"`
+	WhyTop         []WhyTopEntry  `json:"why_top,omitempty"`
+	FreshnessHint  string         `json:"freshness_hint,omitempty"`
 	FirstReadQueue []ReviewQueue  `json:"first_read_queue,omitempty"`
 	ReviewPlan     []ReviewLane   `json:"review_plan,omitempty"`
 	CullLedger     *CullLedger    `json:"cull_ledger,omitempty"`

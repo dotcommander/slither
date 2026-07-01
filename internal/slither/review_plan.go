@@ -139,6 +139,45 @@ func BuildReviewPlanForRepo(repo string, rows []FileEvidence) ([]ReviewQueue, []
 	return queue, buildReviewLanes(repo, queue, rowByPath)
 }
 
+func BuildDataIntegrityInventoryForRepo(repo string, rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
+	rowByPath := map[string]FileEvidence{}
+	rankByPath := map[string]int{}
+	queue := ReviewQueue{
+		ID:    "slither:queue:writes-and-persistence",
+		Group: "writes-and-persistence",
+		Lane:  "data-integrity",
+		Reasons: []string{
+			"migration, store, or stateful artifact signals need integrity checks",
+		},
+	}
+	for _, row := range rows {
+		if !isDataIntegrityRow(row) {
+			continue
+		}
+		if _, ok := rowByPath[row.Path]; !ok {
+			rowByPath[row.Path] = row
+			rankByPath[row.Path] = len(rankByPath)
+		}
+		queue.Files = appendUnique(queue.Files, row.Path)
+		queue.EvidenceClass = strongestEvidenceClass(queue.EvidenceClass, evidenceClassForRow(row))
+		queue.Confidence = strongestConfidence(queue.Confidence, confidenceForRow(row))
+		if queue.Caveat == "" {
+			queue.Caveat = caveatForRow(row)
+		}
+	}
+	if len(queue.Files) == 0 {
+		return nil, nil
+	}
+	sortReviewFiles(queue.Files, queue.Lane, rowByPath, rankByPath)
+	if total := len(queue.Files); total > 12 {
+		queue.Files = queue.Files[:12]
+		queue.OmittedReason = "showing 12 of " + itoa(total) + " files; truncated by review-plan cap"
+	}
+	queue.Reasons = dedupeSorted(queue.Reasons)
+	queues := []ReviewQueue{queue}
+	return queues, buildReviewLanes(repo, queues, rowByPath)
+}
+
 func sortReviewFiles(files []string, lane string, rowByPath map[string]FileEvidence, rankByPath map[string]int) {
 	slices.SortFunc(files, func(a, b string) int {
 		left := reviewLaneFilePriority(lane, rowByPath[a])
@@ -207,6 +246,9 @@ func actionabilityForRow(row FileEvidence) Actionability {
 	if likelyDefectRow(row) {
 		return ActionabilityLikelyDefect
 	}
+	if highRiskInspectRow(row) {
+		return ActionabilityHighRiskInspect
+	}
 	if row.Score < 3 {
 		if rowHasHotspotActionabilitySignal(row) {
 			return ActionabilityHotspot
@@ -226,9 +268,6 @@ func likelyDefectRow(row FileEvidence) bool {
 	if row.Score < 4 || evidenceIntersectionCount(row) < 2 {
 		return false
 	}
-	if rowHasLikelyDefectSignal(row) {
-		return true
-	}
 	for _, reason := range row.Reasons {
 		if highRiskContentReason(reason) {
 			return true
@@ -237,11 +276,15 @@ func likelyDefectRow(row FileEvidence) bool {
 	return false
 }
 
+func highRiskInspectRow(row FileEvidence) bool {
+	return row.Score >= 4 && evidenceIntersectionCount(row) >= 2 && rowHasHighRiskInspectSignal(row)
+}
+
 func rowHasHotspotActionabilitySignal(row FileEvidence) bool {
 	return row.HotspotRisk > 0 || row.CentralityRisk > 0 || row.CochangeRisk > 0 || row.OwnershipRisk > 0 || row.SmellRisk > 0
 }
 
-func rowHasLikelyDefectSignal(row FileEvidence) bool {
+func rowHasHighRiskInspectSignal(row FileEvidence) bool {
 	return row.WorkflowSecurityRisk > 0 ||
 		row.MigrationSafetyRisk > 0 ||
 		row.ContainerBuildRisk > 0 ||

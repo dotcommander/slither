@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -42,6 +43,8 @@ func printHelp(w io.Writer) {
 Usage:
   slither version [--build]
   slither report [repo] [--out %s] [--top %d] [--max-bytes %d] [--days %d]
+  slither report [repo] --focus "postgres|pgx|migration" --why-top 10
+  slither report [repo] --include "internal/**" --exclude "**/*_test.go"
   slither report [repo] --json --out slither-report.json
   slither report [repo] --cull --json --out slither-cull.json
   slither report [repo] --patterns triage_patterns.json --json
@@ -81,6 +84,11 @@ func normalizeReportArgs(args []string) []string {
 		"-max-bytes": true, "--max-bytes": true,
 		"-days": true, "--days": true,
 		"-patterns": true, "--patterns": true,
+		"-focus": true, "--focus": true,
+		"-include": true, "--include": true,
+		"-exclude": true, "--exclude": true,
+		"-why-top": true, "--why-top": true,
+		"-inventory": true, "--inventory": true,
 		"-model": true, "--model": true,
 		"-base-url": true, "--base-url": true,
 		"-api-key-env": true, "--api-key-env": true,
@@ -118,11 +126,18 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv, FallbackModels: cfg.FallbackModels}
+	include := stringListFlag{}
+	exclude := stringListFlag{}
 	fs.StringVar(&opts.Out, "out", opts.Out, "Markdown report path, or - for stdout")
 	fs.IntVar(&opts.Top, "top", opts.Top, "ranked production files to include")
 	fs.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum bytes to inspect per file")
 	fs.IntVar(&opts.Days, "days", opts.Days, "history window in days for churn and bug-fix signals")
 	fs.StringVar(&opts.Patterns, "patterns", "", "JSON path/content pattern file")
+	fs.StringVar(&opts.Focus, "focus", "", "regexp matched against path, evidence layers, reasons, and summary")
+	fs.Var(&include, "include", "path glob to include; repeat or comma-separate")
+	fs.Var(&exclude, "exclude", "path glob to exclude; repeat or comma-separate")
+	fs.IntVar(&opts.WhyTop, "why-top", 0, "include concise explanations for the top N ranked files")
+	fs.StringVar(&opts.Inventory, "inventory", "", "group a review-lane inventory; currently supports data-integrity")
 	fs.StringVar(&opts.Model, "model", opts.Model, "cheap model ID for wormhole scoring")
 	fs.StringVar(&opts.BaseURL, "base-url", opts.BaseURL, "OpenAI-compatible base URL")
 	fs.StringVar(&opts.APIKeyEnv, "api-key-env", opts.APIKeyEnv, "environment variable containing the API key")
@@ -139,6 +154,8 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	if fs.NArg() == 1 {
 		opts.Repo = fs.Arg(0)
 	}
+	opts.Include = include.Values()
+	opts.Exclude = exclude.Values()
 	if opts.Top <= 0 {
 		return Options{}, errors.New("--top must be positive")
 	}
@@ -147,6 +164,12 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	}
 	if opts.Days <= 0 {
 		return Options{}, errors.New("--days must be positive")
+	}
+	if opts.WhyTop < 0 {
+		return Options{}, errors.New("--why-top must be non-negative")
+	}
+	if opts.Inventory != "" && opts.Inventory != "data-integrity" {
+		return Options{}, errors.New("--inventory currently supports only data-integrity")
 	}
 	if opts.JSON && opts.Out == defaultOut {
 		opts.Out = "slither-report.json"
@@ -166,6 +189,78 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 		}
 	}
 	return opts, nil
+}
+
+type stringListFlag struct {
+	values []string
+}
+
+func (f *stringListFlag) String() string {
+	return strings.Join(f.values, ",")
+}
+
+func (f *stringListFlag) Set(value string) error {
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			f.values = append(f.values, filepath.ToSlash(part))
+		}
+	}
+	return nil
+}
+
+func (f *stringListFlag) Values() []string {
+	return append([]string(nil), f.values...)
+}
+
+func existingReportFreshnessHint(opts Options) string {
+	if opts.Out == "-" {
+		return ""
+	}
+	outInfo, err := os.Stat(opts.Out)
+	if err != nil {
+		return ""
+	}
+	newest, newestPath := newestRepoFileModTime(opts.Repo, opts.Out)
+	if newestPath == "" || !newest.After(outInfo.ModTime()) {
+		return "existing output was current relative to scanned files before this run"
+	}
+	return fmt.Sprintf("existing output was stale before this run; newest scanned file `%s` is newer than `%s`", newestPath, opts.Out)
+}
+
+func newestRepoFileModTime(repo, out string) (time.Time, string) {
+	var newest time.Time
+	var newestPath string
+	absOut, _ := filepath.Abs(out)
+	_ = filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] && path != repo {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		absPath, _ := filepath.Abs(path)
+		if absOut != "" && absPath == absOut {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+			if rel, err := filepath.Rel(repo, path); err == nil {
+				newestPath = filepath.ToSlash(rel)
+			} else {
+				newestPath = filepath.ToSlash(path)
+			}
+		}
+		return nil
+	})
+	return newest, newestPath
 }
 
 func runReport(ctx context.Context, args []string, stdout io.Writer) error {
@@ -194,11 +289,15 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 		return fmt.Errorf("repo is not a directory: %s", repo)
 	}
 	opts.Repo = repo
+	if opts.Out != "-" {
+		opts.Out = filepath.Clean(opts.Out)
+	}
 
 	report, err := BuildReport(ctx, opts)
 	if err != nil {
 		return err
 	}
+	report.FreshnessHint = existingReportFreshnessHint(opts)
 	if opts.Cull {
 		ledger := BuildCullLedger(report)
 		report.CullLedger = &ledger

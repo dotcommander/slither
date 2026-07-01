@@ -33,6 +33,11 @@ slither report [repo] [flags]
 | `--max-bytes` | `500000` | Maximum bytes inspected per file. Must be positive. |
 | `--days` | `90` | History window (days) for churn and bug-fix signals. Must be positive. |
 | `--patterns` | (embedded) | Path to a JSON path/content pattern file. Overrides the embedded `premium-model-triage` catalog. |
+| `--focus` | (none) | Case-insensitive regexp matched against path, evidence layers, reasons, risk fields, and summary after evidence is computed. |
+| `--include` | (none) | Path glob to include before inspection. Repeat or comma-separate values. Supports common `**` forms such as `internal/**` and `**/*_test.go`. |
+| `--exclude` | (none) | Path glob to exclude before inspection. Repeat or comma-separate values. |
+| `--why-top` | `0` | Add concise explanations for the top N ranked production files in Markdown and JSON. |
+| `--inventory` | (none) | Group a review-lane inventory instead of a general risk queue. Currently supports `data-integrity`. |
 | `--model` | (none) | Cheap model ID for wormhole scoring. Omit for deterministic fallback. |
 | `--base-url` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL. |
 | `--api-key-env` | `OPENROUTER_API_KEY` | Environment variable holding the API key. |
@@ -53,6 +58,21 @@ Machine-readable evidence envelope:
 
 ```bash
 go run ./cmd/slither report /path/to/repo --json --out slither-report.json
+```
+
+Focus on PostgreSQL, pgx, psql, and migration evidence while excluding tests:
+
+```bash
+go run ./cmd/slither report /path/to/repo \
+  --focus "postgres|pgx|psql|migration" \
+  --exclude "**/*_test.go" \
+  --why-top 10
+```
+
+Generate a data-integrity lane inventory:
+
+```bash
+go run ./cmd/slither report /path/to/repo --inventory data-integrity --json --out slither-data.json
 ```
 
 Append an auditable cull ledger (kept targets, alternates, culled buckets,
@@ -132,14 +152,20 @@ present; `--json` retains the full evidence set. Discovery counts, the pattern
 source, and skipped signals are included so missing evidence is visible rather
 than treated as low risk.
 
+When an output file already exists, the next report includes a freshness hint if
+that previous output was older than the newest scanned file before the current
+run rewrote it.
+
 ### Actionability
 
 Each evidence row carries an `actionability` value in Markdown and JSON:
 
 | Value | Meaning |
 | --- | --- |
-| `likely_defect` | Start here when a high-risk deterministic signal is corroborated by another evidence layer. Treat it as a likely bug until review proves otherwise. |
+| `likely_defect` | Start here when a concrete defect-shaped detector such as SSRF, CSRF, IDOR, traversal, unsafe parsing, or credential literal evidence is corroborated by another evidence layer. |
+| `high_risk_inspect` | Inspect high-risk corroborated evidence such as migration, workflow, infrastructure, OpenAPI, CORS, cookie, stale-marker, flaky-test, or oracle signals. This is risk triage, not a defect claim. |
 | `inspect` | Read the file as a strong review seed. The row has enough evidence to justify premium review, but Slither is not claiming a defect. |
+| `dependency_review` | Review dependency manifests and replacement policy separately from defect triage. |
 | `hotspot` | Review when you care about blast radius, churn, centrality, ownership, or code smell. Hotspot rows are prioritization evidence, not bug claims. |
 | `verify_first` | Check context before spending premium review. This covers generated/docs/test-only rows, detector fixtures, weak lexical evidence, model errors, and low-signal rows. |
 
@@ -165,7 +191,10 @@ Markdown. Top-level fields:
 | `model` | string | Model ID used (omitted when empty). |
 | `base_url` | string | Model base URL (omitted when empty). |
 | `skipped_signals` | string[] | Signals skipped during scanning (omitted when empty). |
+| `filters` | object | Active filter metadata: `focus`, `include`, `exclude`, and `inventory` when set. |
 | `rows` | object[] | Per-file evidence. Each row carries `id`, `path`, `evidence_class`, `confidence`, `actionability`, `score`, `reasons`, `summary`, plus per-file risk and count fields. When `--cull` is enabled, each row also carries `cull_decision` and `cull_reason`, using the same bucket names as the cull ledger. |
+| `why_top` | object[] | Concise top-ranked explanations when `--why-top N` is set. Each entry has `rank`, `path`, `score`, `confidence`, `actionability`, `evidence`, `reasons`, `verify_cmd`, and `note`. |
+| `freshness_hint` | string | Present when an existing output file was compared to current scanned files before being rewritten. |
 | `first_read_queue` | object[] | Files to read first; each entry has `id`, `group`, `lane`, `confidence`, `reasons`, `files`, `caveat` (omitted when empty). |
 | `review_plan` | object[] | Review lanes; each has `id`, `lane`, `group`, `files`, `gates`, `verify`, `why`, `confidence`, `caveat` (omitted when empty). |
 | `cull_ledger` | object | Cull ledger, present when culling is enabled via `--cull`: which files were kept, demoted to alternates, or culled, with bucketed reasons and `actionability` on examples (omitted otherwise). |
