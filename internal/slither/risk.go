@@ -264,10 +264,14 @@ func contentRiskWithLocations(patterns scoringPatterns, rel, text string) (int, 
 		score += match.count * match.pattern.Weight
 		reason := "content:" + match.pattern.ID + ":" + itoa(match.count)
 		reasons = append(reasons, reason)
+		snippet := lineSnippetAt(text, match.index)
+		if isSecretPatternID(match.pattern.ID) {
+			snippet = "[redacted]"
+		}
 		locations = append(locations, EvidenceLocation{
 			Reason:  reason,
 			Line:    lineNumberAt(text, match.index),
-			Snippet: lineSnippetAt(text, match.index),
+			Snippet: snippet,
 		})
 	}
 	return score, reasons, locations
@@ -338,6 +342,15 @@ func lineSnippetAt(text string, index int) string {
 func contentPatternSkipped(rel string) bool {
 	switch strings.ToLower(filepathExt(rel)) {
 	case ".json", ".md", ".toml", ".yaml", ".yml":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSecretPatternID(id string) bool {
+	switch id {
+	case "hardcoded_private_key", "provider_token_literal", "credential_assignment_literal":
 		return true
 	default:
 		return false

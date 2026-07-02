@@ -615,6 +615,9 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	e := FileEvidence{Path: filepath.ToSlash(rel), Bytes: info.Size(), Lines: strings.Count(text, "\n") + 1, Excerpt: firstSentence(text)}
 	scoreFile(repo, text, &e, scoreCtx)
 	e.EvidenceLayers = evidenceLayersForReasons(e.Reasons)
+	if stringSliceContains(e.EvidenceLayers, "secret-risk") {
+		e.Excerpt = "[redacted: secret-risk evidence]"
+	}
 	e.Summary = e.Excerpt
 	return e, true, nil
 }
