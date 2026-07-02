@@ -2827,6 +2827,57 @@ func TestRenderJSONIncludesCacheStats(t *testing.T) {
 	}
 }
 
+func TestLifecycleLaneRoutesConcurrentBoundaryRows(t *testing.T) {
+	t.Parallel()
+	row := FileEvidence{
+		Path:           "internal/service/concurrent.go",
+		Score:          5,
+		ContentRisk:    12,
+		FlakeRisk:      0,
+		EvidenceLayers: []string{"content-risk"},
+		Reasons:        []string{"content:async_or_concurrent_boundary:1"},
+	}
+
+	if !isLifecycleRow(row) {
+		t.Fatal("isLifecycleRow should match a concurrent-boundary reason")
+	}
+
+	prio := reviewLaneFilePriority("lifecycle-concurrency", row)
+	if prio <= 0 {
+		t.Fatalf("reviewLaneFilePriority for lifecycle-concurrency lane should be > 0, got %d", prio)
+	}
+}
+
+func TestReviewReasonNeedlesMatchLivePatternCatalog(t *testing.T) {
+	t.Parallel()
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	needles := []string{
+		"shell_boundary",
+		"process_exit",
+		"error_context_dropped",
+		"background_context",
+		"concurrent",
+		"read_all_or_global_growth",
+	}
+
+	for _, needle := range needles {
+		found := false
+		for _, cp := range patterns.ContentPatterns {
+			if strings.Contains(cp.ID, needle) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("needle %q is not a substring of any content-pattern ID; pattern catalog rename would orphan a review-lane needle", needle)
+		}
+	}
+}
+
 func TestRenderOmitsCacheStatsWhenAbsent(t *testing.T) {
 	report := Report{Repo: "/repo", Rows: []FileEvidence{{Path: "a.go"}}}
 	data, err := RenderJSON(report)

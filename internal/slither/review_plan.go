@@ -198,7 +198,7 @@ func reviewLaneFilePriority(lane string, row FileEvidence) int {
 	case "error-handling":
 		return reasonCount(row, "shell_boundary")*6 + reasonCount(row, "process_exit")*6 + reasonCount(row, "error_context_dropped")*4
 	case "lifecycle-concurrency":
-		return row.FlakeRisk*6 + reasonCount(row, "background_context")*4 + reasonCount(row, "concurrency")*4
+		return row.FlakeRisk*6 + reasonCount(row, "background_context")*4 + reasonCount(row, "concurrent")*4 // contract-tested: see TestReviewReasonNeedlesMatchLivePatternCatalog
 	case "performance":
 		return row.HotspotRisk*4 + row.Lines/100 + reasonCount(row, "read_all_or_global_growth")*4
 	case "test-risk":
@@ -888,7 +888,7 @@ func isLifecycleRow(row FileEvidence) bool {
 		return true
 	}
 	for _, reason := range row.Reasons {
-		if strings.Contains(reason, "background_context") || strings.Contains(reason, "concurrency") {
+		if strings.Contains(reason, "background_context") || strings.Contains(reason, "concurrent") { // contract-tested: see TestReviewReasonNeedlesMatchLivePatternCatalog
 			return true
 		}
 	}
