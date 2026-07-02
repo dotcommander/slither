@@ -197,7 +197,7 @@ func pathPatternMatches(pattern, rel string) (bool, error) {
 		return false, fmt.Errorf("invalid path pattern %q: %w", pattern, err)
 	}
 	if strings.Contains(pattern, "**") {
-		return doublestarPatternMatches(pattern, rel), nil
+		return doublestarPatternMatches(pattern, rel)
 	}
 	if !strings.ContainsAny(pattern, "*?[") {
 		return strings.Contains(rel, pattern), nil
@@ -205,30 +205,33 @@ func pathPatternMatches(pattern, rel string) (bool, error) {
 	return false, nil
 }
 
-func doublestarPatternMatches(pattern, rel string) bool {
+func doublestarPatternMatches(pattern, rel string) (bool, error) {
 	if pattern == "**" || pattern == "**/*" {
-		return true
+		return true, nil
 	}
 	parts := strings.Split(pattern, "**")
 	if len(parts) != 2 {
-		return false
+		return false, fmt.Errorf("at most one ** is supported in pattern %q", pattern)
 	}
 	prefix, suffix := parts[0], parts[1]
 	if prefix != "" && !strings.HasPrefix(rel, strings.TrimSuffix(prefix, "/")) {
-		return false
+		return false, nil
 	}
 	if suffix == "" {
-		return true
+		return true, nil
 	}
 	suffix = strings.TrimPrefix(suffix, "/")
 	if suffix == "" {
-		return true
+		return true, nil
 	}
 	if strings.ContainsAny(suffix, "*?[") {
-		ok, _ := path.Match(suffix, path.Base(rel))
-		return ok || strings.HasSuffix(rel, strings.TrimPrefix(suffix, "*"))
+		ok, err := path.Match(suffix, path.Base(rel))
+		if err != nil {
+			return false, err
+		}
+		return ok || strings.HasSuffix(rel, strings.TrimPrefix(suffix, "*")), nil
 	}
-	return strings.HasSuffix(rel, suffix) || strings.Contains(rel, suffix)
+	return strings.HasSuffix(rel, suffix) || strings.Contains(rel, suffix), nil
 }
 
 func compileFocus(focus string) (*regexp.Regexp, error) {

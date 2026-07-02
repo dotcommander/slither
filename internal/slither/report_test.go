@@ -341,6 +341,28 @@ func TestBuildReportFiltersFocusIncludeExcludeAndWhyTop(t *testing.T) {
 	}
 }
 
+func TestPathPatternRejectsMultipleDoublestars(t *testing.T) {
+	_, err := pathPatternMatches("a/**/b/**/c.go", "x/y/z.go")
+	if err == nil {
+		t.Fatal("expected error for pattern with multiple **, got nil")
+	}
+}
+
+func TestBuildReportRejectsMultiDoublestarInclude(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, "internal/foo/bar.go", "package foo\n")
+
+	_, err := BuildReport(context.Background(), Options{
+		Repo:     tmp,
+		Top:      10,
+		MaxBytes: 2000,
+		Include:  []string{"x/**/y/**/z.go"},
+	})
+	if err == nil {
+		t.Fatal("expected error for include pattern with multiple **, got nil")
+	}
+}
+
 func TestBuildReportInventoryDataIntegrityFiltersRows(t *testing.T) {
 	tmp := t.TempDir()
 	writeFile(t, tmp, "migrations/001.sql", "DROP TABLE users;\n")
