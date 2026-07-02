@@ -25,7 +25,6 @@ type contentPattern struct {
 	Pattern    *regexp2.Regexp
 	Weight     int
 	MaxMatches int
-	Layer      string
 }
 
 type scoringPatterns struct {
@@ -34,103 +33,7 @@ type scoringPatterns struct {
 	Source          string
 }
 
-var fallbackPathTerms = []fallbackTerm{
-	{Term: "auth", Weight: 5, Layer: "path-risk"},
-	{Term: "security", Weight: 5, Layer: "path-risk"},
-	{Term: "crypto", Weight: 5, Layer: "path-risk"},
-	{Term: "permission", Weight: 5, Layer: "path-risk"},
-	{Term: "payment", Weight: 5, Layer: "path-risk"},
-	{Term: "billing", Weight: 5, Layer: "path-risk"},
-	{Term: "secret", Weight: 5, Layer: "path-risk"},
-	{Term: "token", Weight: 4, Layer: "path-risk"},
-	{Term: "credential", Weight: 4, Layer: "path-risk"},
-	{Term: "migration", Weight: 4, Layer: "path-risk"},
-	{Term: "database", Weight: 4, Layer: "path-risk"},
-	{Term: "db", Weight: 3, Layer: "path-risk"},
-	{Term: "workflow", Weight: 3, Layer: "path-risk"},
-	{Term: "agent", Weight: 3, Layer: "path-risk"},
-	{Term: "config", Weight: 3, Layer: "path-risk"},
-	{Term: "deploy", Weight: 3, Layer: "path-risk"},
-	{Term: "router", Weight: 3, Layer: "path-risk"},
-	{Term: "handler", Weight: 3, Layer: "path-risk"},
-	{Term: "main.go", Weight: 4, Layer: "path-risk"},
-	{Term: "types.go", Weight: 2, Layer: "path-risk"},
-	{Term: "go.mod", Weight: 4, Layer: "path-risk"},
-	{Term: "go.sum", Weight: 3, Layer: "path-risk"},
-	{Term: "readme", Weight: 2, Layer: "path-risk"},
-	{Term: "cache", Weight: 3, Layer: "path-risk"},
-	{Term: "env", Weight: 2, Layer: "path-risk"},
-	{Term: "utils", Weight: 2, Layer: "path-risk"},
-	{Term: "helpers", Weight: 2, Layer: "path-risk"},
-}
 
-var fallbackContentPatterns = []contentPattern{
-	pattern("todo", `\bTODO\b`, 2, 5, "work-marker"),
-	pattern("fixme", `\bFIXME\b`, 2, 5, "work-marker"),
-	pattern("panic_call", `\bpanic\s*\(`, 3, 5, "content-risk"),
-	pattern("process_exit", `\b(os\.Exit|process\.exit|System\.exit)\s*\(`, 2, 4, "content-risk"),
-	pattern("shell_boundary", `\b(exec\.Command|subprocess\.run|child_process\.|shell_exec|passthru|system\s*\()`, 2, 4, "content-risk"),
-	pattern("dynamic_eval", `\b(eval|Function)\s*\(`, 3, 3, "content-risk"),
-	pattern("browser_injection", `\b(innerHTML|dangerouslySetInnerHTML)\b`, 3, 3, "content-risk"),
-	pattern("open_redirect_request_target", `(?is)\b(?:res\.redirect|res\.location|redirect|RedirectResponse|NextResponse\.redirect|response\.sendRedirect|Response\.Redirect|redirect_to|header\s*\(\s*["']Location:)\s*\([^;\n]{0,240}\b(?:req(?:uest)?\.(?:query|body|params)|request\.(?:args|form|GET|POST|query_params|nextUrl\.searchParams)|params\s*\[:(?:url|next|redirect|return_to|returnUrl)\]|searchParams\.get\s*\(\s*["'](?:url|next|redirect|return|returnTo|return_to|continue|to)["']|getParameter\s*\(\s*["'](?:url|next|redirect|return|returnTo|return_to|continue|to)["'])`, 5, 5, "content-risk"),
-	pattern("open_forward_request_target", `(?is)\b(?:getRequestDispatcher|forward)\s*\([^;\n]{0,200}\b(?:request\.getParameter\s*\(\s*["'](?:fwd|forward|url|next|redirect)["']|req(?:uest)?\.(?:query|body|params)|request\.(?:args|form|GET|POST|query_params))`, 5, 5, "content-risk"),
-	pattern("csrf_framework_disabled_or_exempt", `(?is)(?:@c[s]rf_exempt\b|\bc[s]rf\s*\([^)]*\)\s*\.\s*disable\s*\(|\bc[s]rf\s*:\s*false\b|\bc[s]rfProtection\s*:\s*false\b|\bignoreC[S]RF\b|\bC[S]RF_COOKIE_SECURE\s*=\s*False\b)`, 5, 5, "content-risk"),
-	pattern("csrf_token_in_url", `(?i)(?:[?&](?:c[s]rf|x[s]rf|c[s]rf[_-]?token|authenticity_token)=|URLSearchParams\s*\([^\n;]{0,180}(?:c[s]rf|x[s]rf|authenticity_token))`, 4, 5, "content-risk"),
-	pattern("csrf_credentialed_state_change_client", `(?is)(?:\bfetch\s*\([^;\n]{0,420}\bmethod\s*:\s*["'](?:POST|PUT|PATCH|DELETE)["'][^;\n]{0,420}\bcredentials\s*:\s*["']include["']|\baxios\.(?:post|put|patch|delete|request)\s*\([^;\n]{0,420}\bwithCredentials\s*:\s*true)`, 3, 5, "content-risk"),
-	pattern("csrf_broad_allowed_origins", `\ballowedOrigins\s*:\s*\[[^\]]*["']\*["']`, 4, 5, "content-risk"),
-	pattern("idor_request_param_object_lookup", `(?is)\b(?:findById|findUnique|findFirst|findOne|get_object_or_404|objects\.get|Model\.find|Project\.find|User\.find)\s*\([^;\n]{0,260}\b(?:req(?:uest)?\.(?:params|query|body)\.(?:id|userId|user_id|accountId|account_id|projectId|project_id|documentId|document_id)|params\.(?:id|userId|user_id|accountId|account_id|projectId|project_id|documentId|document_id)|searchParams\.get\s*\(\s*["'](?:id|userId|accountId|projectId|documentId)["']|request\.(?:args|form|json|query_params)\s*\[\s*["'](?:id|user_id|account_id|project_id|document_id)["'])`, 5, 5, "content-risk"),
-	pattern("idor_sql_request_id_lookup", `(?is)\b(?:SELECT|UPDATE|DELETE)\b[^;\n]{0,260}\bWHERE\s+(?:\w+\.)?(?:id|user_id|account_id|project_id|document_id)\s*=\s*[^;\n]{0,180}\b(?:req(?:uest)?\.(?:params|query|body)|params\.|request\.(?:args|form|json|query_params))`, 5, 5, "content-risk"),
-	pattern("idor_hidden_object_id_field", `(?is)<input\b[^>]{0,260}\btype\s*=\s*["']hidden["'][^>]{0,260}\bname\s*=\s*["'](?:user_id|account_id|project_id|document_id|owner_id|tenant_id)["']`, 4, 5, "content-risk"),
-	pattern("idor_graphql_id_variable_mutation", `(?is)\bmutation\b[^;\n]{0,420}\$\w*(?:Id|ID|Key|Keys)\s*:\s*(?:\[\s*)?ID!?|\bvariables\s*[:=]\s*\{[^}\n]{0,360}\b(?:userId|accountId|projectId|documentId|reportKeys)\b`, 4, 5, "content-risk"),
-	pattern("mass_assignment_request_body_write", `(?is)\b(?:new\s+[A-Z]\w*|[A-Z]\w*\.(?:create|update|findByIdAndUpdate|updateOne)|\w+\.(?:create|update|upsert)|Object\.assign)\s*\([^;\n]{0,320}\b(?:r[e]q\.body|request\.(?:json|data)|request\.get_json\s*\(|request\.data|await\s+request\.json\s*\(\s*\))`, 5, 5, "content-risk"),
-	pattern("mass_assignment_request_body_spread_or_set", `(?is)\b(?:create|update|findByIdAndUpdate|updateOne|updateMany)\s*\([^;\n]{0,320}(?:\.\.\.\s*r[e]q\.body|data\s*:\s*r[e]q\.body|\$set\s*:\s*r[e]q\.body|body\s*:\s*await\s+request\.json\s*\(\s*\))`, 5, 5, "content-risk"),
-	pattern("mass_assignment_python_request_dict_expand", `(?is)\b(?:payload|data|body)\s*=\s*(?:await\s+request\.json\s*\(\s*\)|request\.get_json\s*\(\s*\)|request\.data)[^;]{0,700}\b(?:[A-Z]\w+\s*\(\s*\*\*\s*(?:payload|data|body)|\w+\.(?:update|create)\s*\(\s*\*\*\s*(?:payload|data|body))`, 5, 5, "content-risk"),
-	pattern("mass_assignment_django_all_fields", `(?is)\bclass\s+\w+Form\b[^;]{0,900}\bfields\s*=\s*["']__all__["']`, 4, 5, "content-risk"),
-	pattern("mass_assignment_laravel_unguarded", `protected\s+\$guarded\s*=\s*(?:array\s*\(\s*\)|\[\s*\])`, 4, 5, "content-risk"),
-	pattern("nosql_request_object_query", `(?is)\b(?:find|findOne|findByIdAndUpdate|updateOne|updateMany|deleteOne|deleteMany|aggregate)\s*\([^;\n]{0,180}\b(?:req(?:uest)?\.(?:query|body|params)|ctx\.(?:query|request\.body)|request\.(?:args|form|json|query_params))\b`, 5, 5, "content-risk"),
-	pattern("nosql_request_spread_or_merge", `(?is)\b(?:find|findOne|aggregate|updateOne|updateMany)\s*\([^;\n]{0,220}(?:\.\.\.\s*(?:req(?:uest)?\.(?:query|body|params)|ctx\.(?:query|request\.body))|Object\.assign\s*\([^;\n]{0,120}\b(?:req(?:uest)?\.(?:query|body|params)|ctx\.(?:query|request\.body)))`, 5, 5, "content-risk"),
-	pattern("nosql_operator_or_eval_surface", `(?:["']\$(?:where|regex|expr|ne|gt|gte|lt|lte|nin|or|and)["']|\b(?:db\.eval|\$where)\b)`, 4, 5, "content-risk"),
-	pattern("ssrf_user_controlled_url_fetch", `(?is)\b(?:fetch|axios\.(?:get|post|request)|got|request|http\.Get|http\.Post|requests\.(?:get|post|request)|httpx\.(?:get|post|request)|urllib\.request\.urlopen|aiohttp\.)\s*\([^;\n]{0,220}\b(?:req(?:uest)?\.(?:query|params|body|url|form|args)|r\.URL\.Query\(\)\.Get|request\.(?:args|form|json|query_params)|params\s*\[["']url["']|body\s*\[["']url["'])`, 5, 5, "content-risk"),
-	pattern("ssrf_cloud_metadata_endpoint", `(?:https?://(?:169\.254\.169\.254|169\.254\.170\.2|100\.100\.100\.200|metadata\.google\.internal|\[?fd00:ec2::254\]?)[^"'\s]*|["'](?:169\.254\.169\.254|169\.254\.170\.2|100\.100\.100\.200|metadata\.google\.internal|fd00:ec2::254|IMDSv?2?)["'])`, 5, 5, "content-risk"),
-	pattern("ssrf_non_http_scheme", `\b(?:file|gopher|dict|data|ftp|smb|smtp)://`, 4, 5, "content-risk"),
-	pattern("unsafe_python_deserialization", `\b(?:pickle|cPickle|_pickle|dill|joblib)\.(?:load|loads)\s*\(`, 5, 5, "content-risk"),
-	pattern("unsafe_yaml_load", `\byaml\.load\s*\((?:(?!SafeLoader|safe_load|FullLoader).){0,240}\)`, 4, 5, "content-risk"),
-	pattern("php_unserialize_user_input", `(?is)\bunserialize\s*\(\s*(?:\$_(?:GET|POST|REQUEST|COOKIE)|filter_input\s*\(|base64_decode\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE))`, 5, 5, "content-risk"),
-	pattern("java_native_deserialization", `\b(?:new\s+ObjectInputStream\s*\(|\.readObject\s*\(|\.readUnshared\s*\(|implements\s+Serializable\b)`, 4, 5, "content-risk"),
-	pattern("java_xml_object_deserialization", `\b(?:new\s+XMLDecoder\s*\(|new\s+XStream\s*\(|\.fromXML\s*\()`, 4, 5, "content-risk"),
-	pattern("dotnet_unsafe_deserialization", `\b(?:new\s+(?:BinaryFormatter|NetDataContractSerializer|LosFormatter|ObjectStateFormatter)\s*\(|(?:BinaryFormatter|NetDataContractSerializer|LosFormatter|ObjectStateFormatter)\s*\.\s*Deserialize\s*\()`, 5, 5, "content-risk"),
-	pattern("xxe_java_xml_factory_surface", `\b(?:DocumentBuilderFactory|SAXParserFactory|XMLInputFactory|TransformerFactory|SchemaFactory)\.newInstance\s*\(`, 3, 5, "content-risk"),
-	pattern("xxe_java_unsafe_feature_enabled", `(?is)\b(?:setFeature|setProperty)\s*\([^;\n]{0,220}(?:external-general-entities|external-parameter-entities|load-external-dtd|ACCESS_EXTERNAL_DTD|ACCESS_EXTERNAL_SCHEMA|SUPPORT_DTD|isSupportingExternalEntities)[^;\n]{0,80}\b(?:true|all|file|http)\b`, 5, 5, "content-risk"),
-	pattern("xxe_python_lxml_unsafe_options", `(?is)\b(?:etree\.)?XMLParser\s*\([^)]*\b(?:resolve_entities\s*=\s*True|load_dtd\s*=\s*True|no_network\s*=\s*False|huge_tree\s*=\s*True)`, 5, 5, "content-risk"),
-	pattern("xxe_php_libxml_entity_expansion", `(?is)\b(?:simplexml_load_string|simplexml_load_file|DOMDocument\s*::\s*loadXML|->\s*loadXML|->\s*load)\s*\([^;\n]{0,220}\b(?:LIBXML_NOENT|LIBXML_DTDLOAD|LIBXML_DTDATTR)\b`, 5, 5, "content-risk"),
-	pattern("xxe_dotnet_dtd_or_resolver_enabled", `\b(?:DtdProcessing\s*=\s*DtdProcessing\.Parse|XmlResolver\s*=\s*new\s+XmlUrlResolver\s*\()`, 5, 5, "content-risk"),
-	pattern("xxe_c_libxml_entity_expansion", `(?is)\b(?:xmlCtxtReadDoc|xmlCtxtReadFd|xmlCtxtReadFile|xmlCtxtReadIO|xmlCtxtReadMemory|xmlReadDoc|xmlReadFd|xmlReadFile|xmlReadIO|xmlReadMemory|xmlCtxtUseOptions)\s*\([^;\n]{0,260}\b(?:XML_PARSE_NOENT|XML_PARSE_DTDLOAD|XML_PARSE_DTDATTR)\b`, 5, 5, "content-risk"),
-	pattern("prototype_pollution_key_literal", `["'](?:__proto__|constructor\.prototype|prototype\.constructor)["']`, 4, 5, "content-risk"),
-	pattern("prototype_pollution_request_merge", `(?is)\b(?:Object\.assign|\$\.extend|jQuery\.extend|lodash\.merge|_\.merge|merge|deepmerge)\s*\([^;\n]{0,260}\b(?:req\.(?:query|body|params)|request\.(?:query|body|params)|ctx\.(?:query|request\.body)|event\.(?:queryStringParameters|body))\b`, 5, 5, "content-risk"),
-	pattern("prototype_pollution_path_setter", `(?is)\b(?:set|setWith|objectPath\.set|dotProp\.set|lodash\.set|_\.set)\s*\([^;\n]{0,220}\b(?:req\.(?:query|body|params)|request\.(?:query|body|params)|ctx\.(?:query|request\.body)|event\.(?:queryStringParameters|body))\b`, 5, 5, "content-risk"),
-	pattern("graphql_server_surface", `\b(?:new\s+ApolloServer\s*\(|graphqlHTTP\s*\(|createYoga\s*\(|GraphQLModule\.(?:forRoot|forRootAsync)\s*\(|GraphQLServer\s*\(|buildSchema\s*\(|makeExecutableSchema\s*\()`, 3, 5, "content-risk"),
-	pattern("graphql_schema_tooling_enabled", `\b(?:graphiql|playground|introspection)\s*:\s*true\b`, 5, 5, "content-risk"),
-	pattern("graphql_batching_enabled", `\b(?:allowBatchedHttpRequests|allowBatchedRequests|batching|batched)\s*:\s*true\b`, 4, 5, "content-risk"),
-	pattern("graphql_node_id_access_field", `(?im)^\s*(?:node|nodes)\s*\([^\n)]*\b(?:id|ids)\s*:\s*\[?\s*ID\b`, 4, 5, "content-risk"),
-	pattern("websocket_endpoint_surface", `\b(?:new\s+WebSocket\.Server\s*\(|new\s+Server\s*\([^\n;]{0,80}\bws\b|socket\.io|@app\.websocket\s*\(|websocket_endpoint\s*\(|websockets\.serve\s*\(|websocket\.Accept\s*\(|websocket\.Upgrader\s*\{)`, 3, 5, "content-risk"),
-	pattern("websocket_insecure_ws_url", `\bw[s]://(?!localhost\b|127\.0\.0\.1\b|\[?::1\]?)`, 5, 5, "content-risk"),
-	pattern("websocket_allow_all_origin", `(?is)\b(?:CheckOrigin\s*:\s*func|verifyClient\s*:\s*\(?\s*(?:async\s*)?function|verifyClient\s*:\s*\([^\)]*\)\s*=>|verifyClient\s*:\s*\w+\s*=>)[^;\n]{0,360}\breturn\s+true\b|\bcors\s*:\s*\{[^}\n]{0,180}\borigin\s*:\s*["']\*["']`, 5, 5, "content-risk"),
-	pattern("websocket_compression_enabled", `\b(?:perMessageDeflate|permessage-deflate)\s*:\s*true\b`, 4, 5, "content-risk"),
-	pattern("file_upload_boundary", `\b(multipart|chunked\s+upload|resumable\s+upload|upload\s+stream|file\s+upload)\b`, 3, 5, "content-risk"),
-	pattern("path_traversal_user_file_access", `(?is)\b(?:fs\.(?:readFile|readFileSync|createReadStream)|os\.(?:Open|ReadFile)|open|FileResponse|http\.ServeFile|sendFile|download)\s*\([^;\n]{0,240}\b(?:req(?:uest)?\.(?:query|params|body|url|form|args)|r\.URL\.Query\(\)\.Get|request\.(?:args|form|json|query_params|nextUrl\.searchParams)|params\s*\[["'](?:path|file|filename)["']|searchParams\.get\s*\(\s*["'](?:path|file|filename)["'])`, 5, 5, "content-risk"),
-	pattern("path_join_request_input", `(?is)\b(?:path\.(?:join|resolve)|filepath\.(?:Join|Clean|Abs)|os\.path\.(?:join|abspath|normpath))\s*\([^;\n]{0,240}\b(?:req(?:uest)?\.(?:query|params|body|url|form|args)|r\.URL\.Query\(\)\.Get|request\.(?:args|form|json|query_params|nextUrl\.searchParams)|params\s*\[["'](?:path|file|filename)["']|searchParams\.get\s*\(\s*["'](?:path|file|filename)["'])`, 5, 5, "content-risk"),
-	pattern("upload_user_filename_write", `(?is)\b(?:fs\.(?:writeFile|writeFileSync|createWriteStream)|os\.(?:Create|OpenFile)|open|createWriteStream|saveAs|mv|move)\s*\([^;\n]{0,260}\b(?:file\.originalname|req\.file\.originalname|req\.files?\[[^\]]+\]\.name|uploadedFile\.name|UploadFile\.filename|\.Filename\b)`, 5, 5, "content-risk"),
-	pattern("archive_extract_surface", `\b(?:extractall\s*\(|tarfile\.open\s*\(|zipfile\.ZipFile\s*\(|new\s+AdmZip\s*\(|extract[-]zip|unzipper\.|archiver\.|archive[/]zip|tar\.x\s*\(|tar\.extract\s*\()`, 4, 5, "content-risk"),
-	pattern("hardcoded_private_key", `-----BEGIN [A-Z ]*PRIVATE KEY-----`, 5, 3, "secret-risk"),
-	pattern("provider_token_literal", `\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})`, 5, 5, "secret-risk"),
-	pattern("credential_assignment_literal", `(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\b\s*[:=]\s*["'](?!(?:local-)?placeholder["']|example["']|dummy["']|test["']|changeme["']|your[-_][^"']*["'])[^"']{12,}["']`, 4, 5, "secret-risk"),
-	pattern("background_context", `\bcontext\.Background\s*\(`, 2, 4, "unknowns"),
-	pattern("resource_lifecycle", `\b(Open|Connect|NewClient|NewRequest|http\.Client|sql\.Open)\s*\(`, 2, 4, "unknowns"),
-	pattern("read_all_or_global_growth", `\bio\.ReadAll\s*\(\s*(?![^\n)]*LimitReader)|append\s*\([^)]*\.\.\.\)`, 3, 5, "unknowns"),
-	pattern("go_module_replace", `(?m)^replace\s+`, 3, 5, "dependency-health"),
-	pattern("os_specific_command", `\b(?:open|osascript|xdg-open|cmd\.exe|powershell)\b`, 3, 5, "content-risk"),
-	pattern("error_context_dropped", `\bfmt\.Errorf\s*\(\s*["'](?:(?!%w)[^\n])*%[vs](?:(?!%w)[^\n])*["'][^\n)]*\berr\b|catch\s*\([^)]*\)\s*\{(?:(?!cause\s*:).){0,400}\bthrow\s+new\s+Error\s*\(`, 3, 5, "content-risk"),
-}
 
 func loadScoringPatterns(path string) (scoringPatterns, error) {
 	if path == "" {
@@ -179,7 +82,7 @@ func parseScoringPatterns(data []byte, source string) (scoringPatterns, error) {
 		if item.Weight <= 0 {
 			return scoringPatterns{}, fmt.Errorf("path_terms[%d].weight must be positive", index)
 		}
-		patterns.PathTerms = append(patterns.PathTerms, fallbackTerm{Term: term, Weight: item.Weight, Layer: "path-risk"})
+		patterns.PathTerms = append(patterns.PathTerms, fallbackTerm{Term: term, Weight: item.Weight})
 	}
 	for index, item := range raw.ContentPatterns {
 		id := strings.TrimSpace(item.ID)
@@ -205,25 +108,12 @@ func parseScoringPatterns(data []byte, source string) (scoringPatterns, error) {
 			Pattern:    compiled,
 			Weight:     item.Weight,
 			MaxMatches: item.MaxMatches,
-			Layer:      "content-risk",
 		})
 	}
 	if len(patterns.PathTerms) == 0 && len(patterns.ContentPatterns) == 0 {
 		return scoringPatterns{}, fmt.Errorf("patterns file must define path_terms or content_patterns: %s", source)
 	}
 	return patterns, nil
-}
-
-func pattern(id, expr string, weight, maxMatches int, layer string) contentPattern {
-	compiled := regexp2.MustCompile(expr, regexp2.None)
-	compiled.MatchTimeout = 100 * time.Millisecond
-	return contentPattern{
-		ID:         id,
-		Pattern:    compiled,
-		Weight:     weight,
-		MaxMatches: maxMatches,
-		Layer:      layer,
-	}
 }
 
 func pathRisk(patterns scoringPatterns, rel string) (int, []string) {

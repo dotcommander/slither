@@ -827,19 +827,6 @@ func TestBuildReportUsesNearestPackageScriptForJavaScriptVerification(t *testing
 	}
 }
 
-func TestCommandDocsVerificationUsesMytreeRegistryGate(t *testing.T) {
-	tmp := t.TempDir()
-	writeFile(t, tmp, "cmd/mytree/main.go", "package main\nfunc main(){}\n")
-	writeFile(t, tmp, "cmd/mytree/docs_refresh_commands.go", "package main\n")
-
-	want := "go test ./cmd/mytree/... && go build -o mytree ./cmd/mytree && ./mytree docs refresh-commands --check"
-	for _, path := range []string{"cmd/mytree/docs_refresh_commands.go", "docs/commands.md"} {
-		if got := verifyCmdForPathInRepo(tmp, path); got != want {
-			t.Fatalf("verify command for %s = %q, want %q", path, got, want)
-		}
-	}
-}
-
 func TestBuildReviewPlanExcludesSeparatedDocsAndHistoryOnlyTests(t *testing.T) {
 	_, plan := BuildReviewPlan([]FileEvidence{
 		{
@@ -1660,16 +1647,41 @@ func TestParseModelScoresExtractsArray(t *testing.T) {
 	}
 }
 
-func TestFallbackScoreIgnoresDetectorLiterals(t *testing.T) {
-	score, reasons := fallbackScore("scan.go", `var fallbackContentTerms = []fallbackTerm{
-	pattern("todo", "\bTODO\b", 2, 5, "work-marker"),
-	pattern("provider_token_literal", "sk-example", 5, 5, "secret-risk"),
-}`, 200)
-	if score != 1 {
-		t.Fatalf("score = %d, want 1; reasons=%#v", score, reasons)
+func TestContentRiskIgnoresDetectorLiterals(t *testing.T) {
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(reasons) != 1 || reasons[0] != "low-signal" {
-		t.Fatalf("reasons = %#v, want low-signal", reasons)
+
+	// Detector-literal text must yield no content reasons.
+	detectorText := "var fallbackpathterms = true\n" +
+		"var pattern( = true\n" +
+		"func example() {\n" +
+		"  _ = fallbackcontentterms\n" +
+		"}\n"
+	score, reasons := contentRisk(patterns, "scan.go", detectorText)
+	if score != 0 {
+		t.Fatalf("detector literal score = %d, want 0; reasons=%#v", score, reasons)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("detector literals produced reasons = %#v, want none", reasons)
+	}
+
+	// Genuine secret line must still be detected.
+	tokenText := "package main\nconst k = \"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n"
+	tokenScore, tokenReasons := contentRisk(patterns, "main.go", tokenText)
+	if tokenScore == 0 {
+		t.Fatalf("token literal score = 0, want > 0; reasons=%#v", tokenReasons)
+	}
+	found := false
+	for _, r := range tokenReasons {
+		if strings.HasPrefix(r, "content:provider_token_literal:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected content:provider_token_literal: reason; got %#v", tokenReasons)
 	}
 }
 

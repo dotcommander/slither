@@ -35,7 +35,6 @@ var errFileUnreadable = errors.New("file vanished or unreadable")
 type fallbackTerm struct {
 	Term   string
 	Weight int
-	Layer  string
 }
 
 func BuildReport(ctx context.Context, opts Options) (Report, error) {
@@ -652,12 +651,6 @@ func readTextPrefix(path string, maxBytes int64) (string, bool, error) {
 		return "", false, nil
 	}
 	return string(data), true, nil
-}
-
-func fallbackScore(path, text string, bytes int64) (int, []string) {
-	e := FileEvidence{Path: path, Bytes: bytes, Lines: strings.Count(text, "\n") + 1}
-	scoreFile("", text, &e, scoreContext{})
-	return e.Score, e.Reasons
 }
 
 func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {

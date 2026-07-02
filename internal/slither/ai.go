@@ -130,14 +130,3 @@ func degradeBatch(out []FileEvidence, err error) {
 		out[i].EvidenceLayers = evidenceLayersForReasons(out[i].Reasons)
 	}
 }
-
-// Score scores a single file by delegating to ScoreBatch. Retained for
-// compatibility; ScoreBatch is the primary path. The returned evidence already
-// carries any model_error signal, so the error is nil on the normal path.
-func (s *ModelScorer) Score(ctx context.Context, evidence FileEvidence) (FileEvidence, error) {
-	out, err := s.ScoreBatch(ctx, []FileEvidence{evidence})
-	if err != nil {
-		return evidence, err
-	}
-	return out[0], nil
-}

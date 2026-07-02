@@ -557,9 +557,6 @@ func verifyCmdForPathInRepo(repo, path string) string {
 	if isGeneratedOrReportPath(rel) {
 		return ""
 	}
-	if cmd := commandDocsVerifyCmd(repo, rel); cmd != "" {
-		return cmd
-	}
 	if cmd := phpVerifyCmd(repo, rel); cmd != "" {
 		return cmd
 	}
@@ -664,22 +661,6 @@ func isRepoConfigPath(rel string) bool {
 	default:
 		return false
 	}
-}
-
-func commandDocsVerifyCmd(repo, rel string) string {
-	if repo == "" {
-		return ""
-	}
-	if rel != "docs/commands.md" && !strings.Contains(rel, "docs_refresh_commands") {
-		return ""
-	}
-	if _, err := os.Stat(filepath.Join(repo, "cmd", "mytree", "docs_refresh_commands.go")); err != nil {
-		return ""
-	}
-	if _, err := os.Stat(filepath.Join(repo, "cmd", "mytree", "main.go")); err != nil {
-		return ""
-	}
-	return "go test ./cmd/mytree/... && go build -o mytree ./cmd/mytree && ./mytree docs refresh-commands --check"
 }
 
 func isJavaScriptSourcePath(path string) bool {
