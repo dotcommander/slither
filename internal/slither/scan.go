@@ -3,8 +3,10 @@ package slither
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -27,6 +29,8 @@ var skipDirs = map[string]bool{
 var skipSuffixes = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".tar", ".mp4", ".mp3", ".lock", ".sum"}
 
 const maxInspectWorkers = 16
+
+var errFileUnreadable = errors.New("file vanished or unreadable")
 
 type fallbackTerm struct {
 	Term   string
@@ -68,7 +72,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if scorer == nil {
 		skippedSignals = append(skippedSignals, "model_scoring:not_configured")
 	}
-	rows, err := inspectFiles(ctx, opts.Repo, paths, opts.MaxBytes, scoreCtx)
+	rows, skipped, err := inspectFiles(ctx, opts.Repo, paths, opts.MaxBytes, scoreCtx)
 	if err != nil {
 		return Report{}, err
 	}
@@ -77,6 +81,9 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		baseURL = opts.BaseURL
 	}
 	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals, Filters: ReportFilters{Focus: opts.Focus, Include: opts.Include, Exclude: opts.Exclude, Inventory: opts.Inventory}}
+	if skipped > 0 {
+		report.SkippedSignals = append(report.SkippedSignals, "scan:unreadable_skipped:"+itoa(skipped))
+	}
 	// Pre-rank deterministically and only spend model calls on the top band:
 	// rows ranked well below --top keep their deterministic score, so the
 	// reported set is preserved without paying to score files that get
@@ -297,9 +304,9 @@ func modelScoreLimit(top, n int) int {
 	return limit
 }
 
-func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int64, scoreCtx scoreContext) ([]FileEvidence, error) {
+func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int64, scoreCtx scoreContext) ([]FileEvidence, int, error) {
 	if len(paths) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -319,6 +326,10 @@ func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int
 				}
 				evidence, ok, err := inspectFile(repo, path, maxBytes, scoreCtx)
 				if err != nil {
+					if errors.Is(err, errFileUnreadable) {
+						results <- inspectResult{skipped: true}
+						continue
+					}
 					results <- inspectResult{err: err}
 					cancel()
 					return
@@ -348,6 +359,7 @@ func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int
 
 	rows := make([]FileEvidence, 0, len(paths))
 	var firstErr error
+	var skippedCount int
 	for result := range results {
 		if result.err != nil {
 			if firstErr == nil {
@@ -356,22 +368,27 @@ func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int
 			}
 			continue
 		}
+		if result.skipped {
+			skippedCount++
+			continue
+		}
 		if result.ok {
 			rows = append(rows, result.evidence)
 		}
 	}
 	if firstErr != nil {
-		return nil, firstErr
+		return nil, 0, firstErr
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return rows, nil
+	return rows, skippedCount, nil
 }
 
 type inspectResult struct {
 	evidence FileEvidence
 	ok       bool
+	skipped  bool
 	err      error
 }
 
@@ -571,6 +588,9 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			return FileEvidence{}, false, errFileUnreadable
+		}
 		return FileEvidence{}, false, fmt.Errorf("lstat %s: %w", rel, err)
 	}
 	if info.IsDir() {
@@ -580,8 +600,14 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 		return FileEvidence{}, false, nil
 	}
 	text, ok, err := readTextPrefix(path, maxBytes)
-	if err != nil || !ok {
-		return FileEvidence{}, ok, err
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			return FileEvidence{}, false, errFileUnreadable
+		}
+		return FileEvidence{}, false, err
+	}
+	if !ok {
+		return FileEvidence{}, false, nil
 	}
 	e := FileEvidence{Path: filepath.ToSlash(rel), Bytes: info.Size(), Lines: strings.Count(text, "\n") + 1, Excerpt: firstSentence(text)}
 	scoreFile(repo, text, &e, scoreCtx)
