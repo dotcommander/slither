@@ -462,9 +462,12 @@ func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, 
 			if len(untracked) > 0 {
 				skippedSignals = append(skippedSignals, "git_ls_files:included_untracked:"+itoa(len(untracked)))
 			}
-			paths, missing := appendGitFiles(repo, tracked, untracked)
+			paths, missing, irregular := appendGitFiles(repo, tracked, untracked)
 			if missing > 0 {
 				skippedSignals = append(skippedSignals, "git_ls_files:missing_tracked:"+itoa(missing))
+			}
+			if irregular > 0 {
+				skippedSignals = append(skippedSignals, "git_ls_files:irregular_skipped:"+itoa(irregular))
 			}
 			discovery := DiscoveryStats{
 				Source:         "git",
@@ -482,6 +485,7 @@ func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, 
 	}
 
 	var paths []string
+	var irregular int
 	err = filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -492,6 +496,10 @@ func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, 
 			}
 			return nil
 		}
+		if !d.Type().IsRegular() {
+			irregular++
+			return nil
+		}
 		paths = append(paths, path)
 		return nil
 	})
@@ -499,6 +507,9 @@ func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, 
 		Source:          "filesystem",
 		FilesystemFiles: len(paths),
 		CandidateFiles:  len(paths),
+	}
+	if irregular > 0 {
+		skippedSignals = append(skippedSignals, "filesystem_walk:irregular_skipped:"+itoa(irregular))
 	}
 	return paths, discovery, skippedSignals, err
 }
@@ -519,10 +530,11 @@ func gitFiles(ctx context.Context, repo string, args ...string) ([]string, error
 	return paths, scanner.Err()
 }
 
-func appendGitFiles(repo string, groups ...[]string) ([]string, int) {
+func appendGitFiles(repo string, groups ...[]string) ([]string, int, int) {
 	seen := map[string]bool{}
 	var paths []string
 	var missing int
+	var irregular int
 	for _, group := range groups {
 		for _, rel := range group {
 			path := filepath.Join(repo, rel)
@@ -530,16 +542,23 @@ func appendGitFiles(repo string, groups ...[]string) ([]string, int) {
 				continue
 			}
 			seen[path] = true
-			if _, err := os.Stat(path); err != nil {
+			info, err := os.Lstat(path)
+			if err != nil {
 				if os.IsNotExist(err) {
 					missing++
 					continue
 				}
+				irregular++
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				irregular++
+				continue
 			}
 			paths = append(paths, path)
 		}
 	}
-	return paths, missing
+	return paths, missing, irregular
 }
 
 func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (FileEvidence, bool, error) {
@@ -550,11 +569,14 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	if shouldSkip(rel) {
 		return FileEvidence{}, false, nil
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
-		return FileEvidence{}, false, fmt.Errorf("stat %s: %w", rel, err)
+		return FileEvidence{}, false, fmt.Errorf("lstat %s: %w", rel, err)
 	}
 	if info.IsDir() {
+		return FileEvidence{}, false, nil
+	}
+	if !info.Mode().IsRegular() {
 		return FileEvidence{}, false, nil
 	}
 	text, ok, err := readTextPrefix(path, maxBytes)
