@@ -335,6 +335,7 @@ func isGeneratedOrReportPath(path string) bool {
 		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "report")) ||
 		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "scoreboard")) ||
 		(strings.HasPrefix(lower, "docs/") && strings.Contains(lower, "benchmark")) ||
+		strings.Contains(lower, "slither-cull") ||
 		strings.Contains(lower, "slither-report") ||
 		strings.Contains(lower, "triage-report") ||
 		strings.Contains(lower, "/reports/")
