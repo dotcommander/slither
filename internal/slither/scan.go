@@ -45,6 +45,9 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if opts.Days <= 0 {
 		opts.Days = 90
 	}
+	if opts.MaxBytes <= 0 {
+		opts.MaxBytes = defaultMaxBytes
+	}
 	paths, discovery, skippedSignals, err := discoverFiles(ctx, opts.Repo)
 	if err != nil {
 		return Report{}, err

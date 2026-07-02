@@ -56,8 +56,7 @@ func TestScoutPrecisionReliquary(t *testing.T) {
 		t.Skip("set SLITHER_EVAL_REPO to a reliquary checkout to run the scout precision eval")
 	}
 
-	// MaxBytes is required: BuildReport does not default it (the CLI's resolveReportOptions does).
-	// MaxBytes==0 makes LimitReader read 0 bytes, so every file is skipped and 0 rows are returned.
+	// MaxBytes now defaults in BuildReport when unset; explicit value kept for clarity.
 	report, err := BuildReport(context.Background(), Options{Repo: repo, Top: 80, Cull: true, MaxBytes: 500_000, Days: 90})
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
