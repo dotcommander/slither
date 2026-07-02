@@ -2785,7 +2785,7 @@ func TestScoreTopRowsCachedReportsHitMissCounts(t *testing.T) {
 	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
 	hitRow := baseEvidence("hit.go", 2)
 	missRow := baseEvidence("miss.go", 2)
-	cache.entries[scoreCacheKey("m", hitRow)] = cachedScore{Score: 5, Summary: "cached"}
+	cache.entries[scoreCacheKey("m", "", nil, hitRow)] = cachedScore{Score: 5, Summary: "cached"}
 	s := &ModelScorer{model: "m", generate: func(_ context.Context, _ string, _ int) (string, error) {
 		return `[{"index":0,"score":4,"summary":"fresh","reasons":["r"]}]`, nil
 	}}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // promptVersion is mixed into every cache key. Bump it whenever
@@ -176,15 +177,20 @@ func scoreCachePersistSkippedSignal(cache *scoreCache) string {
 }
 
 // scoreCacheKey hashes the inputs that determine the model's score: the prompt
-// version, the model ID, and the canonical projected evidence. projectEvidence
-// is called with Index 0 because the batch index is positional, not semantic —
-// the same file at a different rank must hash identically.
-func scoreCacheKey(model string, e FileEvidence) string {
+// version, the model ID, the base URL, the fallback models, and the canonical
+// projected evidence. projectEvidence is called with Index 0 because the batch
+// index is positional, not semantic — the same file at a different rank must
+// hash identically.
+func scoreCacheKey(model, baseURL string, fallbackModels []string, e FileEvidence) string {
 	payload, _ := json.Marshal(projectEvidence(0, e))
 	h := sha256.New()
 	h.Write([]byte(promptVersion))
 	h.Write([]byte{0})
 	h.Write([]byte(model))
+	h.Write([]byte{0})
+	h.Write([]byte(baseURL))
+	h.Write([]byte{0})
+	h.Write([]byte(strings.Join(fallbackModels, "\x00")))
 	h.Write([]byte{0})
 	h.Write(payload)
 	return hex.EncodeToString(h.Sum(nil))
@@ -229,7 +235,7 @@ func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvi
 	var missIdx []int
 	var missRows []FileEvidence
 	for i := range rows {
-		keys[i] = scoreCacheKey(scorer.model, rows[i])
+		keys[i] = scoreCacheKey(scorer.model, scorer.baseURL, scorer.fallbackModels, rows[i])
 		if cs, ok := cache.lookup(keys[i]); ok {
 			applyCachedScore(&rows[i], cs)
 			hits++

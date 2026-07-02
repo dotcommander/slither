@@ -12,16 +12,28 @@ import (
 func TestScoreCacheKeyStableAndSensitive(t *testing.T) {
 	t.Parallel()
 	a := baseEvidence("x.go", 2)
-	if scoreCacheKey("m", a) != scoreCacheKey("m", a) {
+	if scoreCacheKey("m", "", nil, a) != scoreCacheKey("m", "", nil, a) {
 		t.Fatal("key not stable for identical inputs")
 	}
-	if scoreCacheKey("m1", a) == scoreCacheKey("m2", a) {
+	if scoreCacheKey("m1", "", nil, a) == scoreCacheKey("m2", "", nil, a) {
 		t.Fatal("key did not change with model")
 	}
 	b := baseEvidence("x.go", 2)
 	b.ContentRisk = 99 // a projected scoring input
-	if scoreCacheKey("m", a) == scoreCacheKey("m", b) {
+	if scoreCacheKey("m", "", nil, a) == scoreCacheKey("m", "", nil, b) {
 		t.Fatal("key did not change with projected evidence")
+	}
+	// baseURL sensitivity
+	if scoreCacheKey("m", "http://a", nil, a) == scoreCacheKey("m", "http://b", nil, a) {
+		t.Fatal("key did not change with baseURL")
+	}
+	// fallback models sensitivity
+	if scoreCacheKey("m", "", []string{"fb1"}, a) == scoreCacheKey("m", "", []string{"fb2"}, a) {
+		t.Fatal("key did not change with fallback models")
+	}
+	// fallback models vs nil sensitivity
+	if scoreCacheKey("m", "", nil, a) == scoreCacheKey("m", "", []string{"fb1"}, a) {
+		t.Fatal("key did not change when fallback models added")
 	}
 }
 
@@ -29,7 +41,7 @@ func TestScoreTopRowsCachedHitSkipsGenerate(t *testing.T) {
 	t.Parallel()
 	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}}
 	row := baseEvidence("a.go", 2)
-	cache.entries[scoreCacheKey("m", row)] = cachedScore{Score: 5, Summary: "cached", Reasons: []string{"rc"}}
+	cache.entries[scoreCacheKey("m", "", nil, row)] = cachedScore{Score: 5, Summary: "cached", Reasons: []string{"rc"}}
 	s := &ModelScorer{model: "m", generate: func(_ context.Context, _ string, _ int) (string, error) {
 		t.Fatal("generate called for a cached row")
 		return "", nil
@@ -53,7 +65,7 @@ func TestScoreTopRowsCachedDegradedNotCached(t *testing.T) {
 	}}
 	rows := []FileEvidence{row}
 	scoreTopRowsCached(context.Background(), s, rows, cache)
-	if _, ok := cache.lookup(scoreCacheKey("m", row)); ok {
+	if _, ok := cache.lookup(scoreCacheKey("m", "", nil, row)); ok {
 		t.Fatal("degraded model_error result was cached")
 	}
 	if len(cache.dirty) != 0 {
@@ -77,7 +89,7 @@ func TestScoreTopRowsCachedMissPersists(t *testing.T) {
 		t.Fatalf("persist: %v", err)
 	}
 	reloaded := loadScoreCache()
-	cs, ok := reloaded.lookup(scoreCacheKey("m", row))
+	cs, ok := reloaded.lookup(scoreCacheKey("m", "", nil, row))
 	if !ok || cs.Score != 4 {
 		t.Fatalf("persisted entry missing or wrong: %+v ok=%v", cs, ok)
 	}
