@@ -2925,3 +2925,44 @@ func TestRenderOmitsCacheStatsWhenAbsent(t *testing.T) {
 		t.Fatalf("run without cache should omit cache stats from markdown:\n%s", md)
 	}
 }
+
+func TestNumstatPathParsesRenames(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		field string
+		want  string
+	}{
+		{name: "plain path", field: "foo/bar.go", want: "foo/bar.go"},
+		{name: "simple rename", field: "old/path.go => new/path.go", want: "new/path.go"},
+		{name: "brace rename", field: "dir/{old => new}/f.go", want: "dir/new/f.go"},
+		{name: "empty-left brace", field: "dir/{ => new}/f.go", want: "dir/new/f.go"},
+		{name: "empty-right brace", field: "dir/{old => }/f.go", want: "dir/f.go"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := numstatPath(tt.field)
+			if got != tt.want {
+				t.Errorf("numstatPath(%q) = %q, want %q", tt.field, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChurnByFileSignalsNoHistory(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	runGitForTest(t, tmp, "init")
+	runGitForTest(t, tmp, "config", "user.email", "test@example.com")
+	runGitForTest(t, tmp, "config", "user.name", "Test")
+
+	churn, skip := churnByFile(context.Background(), tmp, 30)
+	if skip == "" {
+		t.Fatalf("expected non-empty skip reason for repo with no commits, got empty")
+	}
+	if len(churn) != 0 {
+		t.Fatalf("expected empty churn map for repo with no commits, got %d entries", len(churn))
+	}
+}

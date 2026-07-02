@@ -28,11 +28,15 @@ type scoreContext struct {
 func newScoreContext(ctx context.Context, repo string, files []string, maxBytes int64, days int, patterns scoringPatterns) scoreContext {
 	scoreCtx := scoreContext{
 		files:         files,
-		churn:         churnByFile(ctx, repo, days),
 		fixTouches:    map[string]int{},
 		incomingRefs:  localImportCounts(repo, files, maxBytes),
 		documentedEnv: documentedEnvVars(repo, files, maxBytes),
 		patterns:      patterns,
+	}
+	churn, skip := churnByFile(ctx, repo, days)
+	scoreCtx.churn = churn
+	if skip != "" {
+		scoreCtx.skipped = append(scoreCtx.skipped, "churn:"+skip)
 	}
 	fixTouches, skip := bugfixTouchesByFile(ctx, repo, days)
 	scoreCtx.fixTouches = fixTouches
@@ -73,10 +77,10 @@ type staleMarkerInfo struct {
 	OldestDays int
 }
 
-func churnByFile(ctx context.Context, repo string, days int) map[string]int {
+func churnByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
 	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--numstat", "--format=")
 	if out == "" {
-		return map[string]int{}
+		return map[string]int{}, "no recent git history"
 	}
 	churn := map[string]int{}
 	for _, line := range strings.Split(out, "\n") {
@@ -89,9 +93,32 @@ func churnByFile(ctx context.Context, repo string, days int) map[string]int {
 		if errA != nil || errD != nil {
 			continue
 		}
-		churn[parts[2]] += added + deleted
+		churn[numstatPath(parts[2])] += added + deleted
 	}
-	return churn
+	return churn, ""
+}
+
+func numstatPath(field string) string {
+	if !strings.Contains(field, " => ") && !strings.Contains(field, "{") {
+		// Plain path without rename.
+		return field
+	}
+	// Simple rename: "old/path => new/path"
+	if strings.Contains(field, " => ") && !strings.Contains(field, "{") {
+		return strings.TrimSpace(field[strings.LastIndex(field, " => ")+4:])
+	}
+	// Brace/partial rename: "prefix/{old => new}/suffix"
+	beforeBrace := field[:strings.Index(field, "{")]
+	afterBrace := field[strings.Index(field, "}")+1:]
+	inside := field[strings.Index(field, "{")+1 : strings.Index(field, "}")]
+	parts := strings.SplitN(inside, " => ", 2)
+	right := ""
+	if len(parts) == 2 {
+		right = strings.TrimSpace(parts[1])
+	}
+	result := beforeBrace + right + afterBrace
+	// Collapse any doubled slashes from an empty segment.
+	return strings.ReplaceAll(result, "//", "/")
 }
 
 func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
