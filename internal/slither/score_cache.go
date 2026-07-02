@@ -14,7 +14,7 @@ import (
 // promptVersion is mixed into every cache key. Bump it whenever
 // batchScoringPrompt (model_prompt.go) changes so stale entries are invalidated
 // without a manual cache wipe.
-const promptVersion = "1"
+const promptVersion = "2"
 
 // maxCacheEntries caps scores.json so a long-lived cache cannot grow without
 // bound. On persist, entries beyond the cap are pruned, always retaining the

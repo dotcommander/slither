@@ -10,7 +10,7 @@ import (
 // scoringEvidence is a compact projection of FileEvidence for the scoring
 // prompt. It carries only fields that inform scoring and uses omitempty so the
 // many zero-valued risk signals and empty fields vanish from the payload. The
-// Excerpt and report-only fields are deliberately omitted.
+// Excerpt, Summary, and report-only fields are deliberately omitted.
 type scoringEvidence struct {
 	Index                  int      `json:"index"`
 	Path                   string   `json:"path"`
@@ -45,7 +45,6 @@ type scoringEvidence struct {
 	TestGap                bool     `json:"test_gap,omitempty"`
 	EvidenceLayers         []string `json:"evidence_layers,omitempty"`
 	Reasons                []string `json:"reasons,omitempty"`
-	Summary                string   `json:"summary,omitempty"`
 }
 
 func projectEvidence(index int, e FileEvidence) scoringEvidence {
@@ -83,7 +82,6 @@ func projectEvidence(index int, e FileEvidence) scoringEvidence {
 		TestGap:                e.TestGap,
 		EvidenceLayers:         e.EvidenceLayers,
 		Reasons:                e.Reasons,
-		Summary:                e.Summary,
 	}
 }
 

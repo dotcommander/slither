@@ -99,8 +99,8 @@ func TestProjectEvidenceOmitsExcerptAndZeroRisks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(payload)
-	if strings.Contains(s, "EXCERPT_") || strings.Contains(s, "excerpt") {
-		t.Fatalf("excerpt leaked into projection: %s", s)
+	if strings.Contains(s, "EXCERPT_") || strings.Contains(s, "excerpt") || strings.Contains(s, "summary") {
+		t.Fatalf("excerpt or summary leaked into projection: %s", s)
 	}
 	if strings.Contains(s, "path_risk") || strings.Contains(s, "ownership_risk") {
 		t.Fatalf("zero risk signal not omitted: %s", s)

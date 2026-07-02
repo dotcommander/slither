@@ -491,7 +491,7 @@ func rowNote(row FileEvidence) string {
 		return row.Caveat
 	}
 	if stringSliceContains(row.EvidenceLayers, "model") && row.Summary != "" {
-		return truncateCell(row.Summary, 120)
+		return "model: \"" + truncateCell(row.Summary, 110) + "\""
 	}
 	intersection := strongestEvidenceIntersection(row)
 	if intersection != "" && intersection != "unknown" {
