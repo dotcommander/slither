@@ -222,6 +222,25 @@ func TestResolveReportOptionsLocalClearsFallbackModels(t *testing.T) {
 	}
 }
 
+func TestResolveReportOptionsLocalKeepsExplicitFlags(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	opts, err := resolveReportOptions(cfg, []string{"--local", "--base-url", "https://explicit.example.com/v1", "--api-key-env", "MY_CUSTOM_KEY", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.BaseURL != "https://explicit.example.com/v1" {
+		t.Fatalf("base url = %q, want explicit override preserved", opts.BaseURL)
+	}
+	if opts.APIKeyEnv != "MY_CUSTOM_KEY" {
+		t.Fatalf("api key env = %q, want explicit override preserved", opts.APIKeyEnv)
+	}
+	// Model was NOT explicitly passed, so local profile model should still apply.
+	if opts.Model != cfg.Local.Model {
+		t.Fatalf("model = %q, want local profile default %q", opts.Model, cfg.Local.Model)
+	}
+}
+
 func TestResolveReportOptionsNoCacheFlag(t *testing.T) {
 	t.Parallel()
 	opts, err := resolveReportOptions(defaultConfig(), []string{"--no-cache", "."})

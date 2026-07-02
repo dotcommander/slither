@@ -161,3 +161,37 @@ func TestNewModelScorerThreadsFallbackModels(t *testing.T) {
 		t.Fatalf("fallbackModels = %#v, want [fb1 fb2]", s.fallbackModels)
 	}
 }
+
+func TestNewModelScorerCustomAPIKeyEnvHonored(t *testing.T) {
+	// t.Setenv is incompatible with t.Parallel; keep this test serial.
+	t.Setenv("MY_CUSTOM_API_KEY", "sk-custom-fake")
+	opts := Options{
+		Model:     "primary",
+		BaseURL:   "https://openrouter.ai/api/v1",
+		APIKeyEnv: "MY_CUSTOM_API_KEY",
+	}
+	s, err := NewModelScorer(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s == nil {
+		t.Fatal("expected scorer for non-empty model with custom API key env")
+	}
+}
+
+func TestNewModelScorerOpenRouterFallsBackToDefaultEnv(t *testing.T) {
+	// t.Setenv is incompatible with t.Parallel; keep this test serial.
+	t.Setenv("OPENROUTER_API_KEY", "sk-default-env")
+	opts := Options{
+		Model:   "primary",
+		BaseURL: "https://openrouter.ai/api/v1",
+		// APIKeyEnv empty -> fall back to WithProviderFromEnv("openrouter")
+	}
+	s, err := NewModelScorer(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s == nil {
+		t.Fatal("expected scorer for non-empty model with default env var")
+	}
+}

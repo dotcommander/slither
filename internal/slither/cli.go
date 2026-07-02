@@ -148,6 +148,8 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	if err := fs.Parse(normalizeReportArgs(args)); err != nil {
 		return Options{}, err
 	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if fs.NArg() > 1 {
 		return Options{}, errors.New("report accepts at most one repo path")
 	}
@@ -181,10 +183,10 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 		if opts.Model == "" {
 			opts.Model = cfg.Local.Model
 		}
-		if opts.BaseURL == "" || opts.BaseURL == cfg.BaseURL {
+		if !set["base-url"] {
 			opts.BaseURL = cfg.Local.BaseURL
 		}
-		if opts.APIKeyEnv == cfg.APIKeyEnv {
+		if !set["api-key-env"] {
 			opts.APIKeyEnv = cfg.Local.APIKeyEnv
 		}
 	}

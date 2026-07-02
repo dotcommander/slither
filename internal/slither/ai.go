@@ -21,7 +21,7 @@ const (
 )
 
 type ModelScorer struct {
-	wh      *wormhole.Wormhole
+	wh             *wormhole.Wormhole
 	model          string
 	baseURL        string
 	fallbackModels []string
@@ -40,7 +40,18 @@ func NewModelScorer(opts Options) (*ModelScorer, error) {
 	provider := providerForBaseURL(opts.BaseURL)
 	var wh *wormhole.Wormhole
 	if provider != "" {
-		wh = wormhole.New(wormhole.WithProviderFromEnv(provider), wormhole.WithDefaultProvider(provider))
+		if opts.APIKeyEnv != "" {
+			apiKey := os.Getenv(opts.APIKeyEnv)
+			if apiKey != "" {
+				wh = wormhole.New(
+					wormhole.WithOpenAICompatible(provider, opts.BaseURL, types.NewProviderConfig(apiKey)),
+					wormhole.WithDefaultProvider(provider),
+				)
+			}
+		}
+		if wh == nil {
+			wh = wormhole.New(wormhole.WithProviderFromEnv(provider), wormhole.WithDefaultProvider(provider))
+		}
 	} else {
 		apiKey := ""
 		if opts.APIKeyEnv != "" {
