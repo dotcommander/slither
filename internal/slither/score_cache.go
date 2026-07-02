@@ -163,7 +163,7 @@ func (c *scoreCache) persist() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.path, append(data, '\n'), 0o644)
+	return atomicWriteFile(c.path, append(data, '\n'), 0o644)
 }
 
 func scoreCachePersistSkippedSignal(cache *scoreCache) string {

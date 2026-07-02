@@ -88,6 +88,11 @@ func TestScoreTopRowsCachedMissPersists(t *testing.T) {
 	if err := cache.persist(); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
+	// Verify no stray temp files from atomic write are left behind.
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(cache.path), "scores.json.tmp-*"))
+	if len(matches) != 0 {
+		t.Fatalf("temp file litter after persist: %v", matches)
+	}
 	reloaded := loadScoreCache()
 	cs, ok := reloaded.lookup(scoreCacheKey("m", "", nil, row))
 	if !ok || cs.Score != 4 {
