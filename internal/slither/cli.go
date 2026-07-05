@@ -215,7 +215,7 @@ func (f *stringListFlag) Values() []string {
 	return append([]string(nil), f.values...)
 }
 
-func existingReportFreshnessHint(opts Options) string {
+func existingReportFreshnessHint(ctx context.Context, opts Options) string {
 	if opts.Out == "-" {
 		return ""
 	}
@@ -223,45 +223,43 @@ func existingReportFreshnessHint(opts Options) string {
 	if err != nil {
 		return ""
 	}
-	newest, newestPath := newestRepoFileModTime(opts.Repo, opts.Out)
+	newest, newestPath := newestScannedFileModTime(ctx, opts)
 	if newestPath == "" || !newest.After(outInfo.ModTime()) {
 		return "existing output was current relative to scanned files before this run"
 	}
 	return fmt.Sprintf("existing output was stale before this run; newest scanned file `%s` is newer than `%s`", newestPath, opts.Out)
 }
 
-func newestRepoFileModTime(repo, out string) (time.Time, string) {
+func newestScannedFileModTime(ctx context.Context, opts Options) (time.Time, string) {
+	paths, _, _, err := discoverFiles(ctx, opts.Repo)
+	if err != nil {
+		return time.Time{}, ""
+	}
+	paths, _, err = filterDiscoveredPaths(opts.Repo, paths, opts.Include, opts.Exclude)
+	if err != nil {
+		return time.Time{}, ""
+	}
+	absOut, _ := filepath.Abs(opts.Out)
 	var newest time.Time
 	var newestPath string
-	absOut, _ := filepath.Abs(out)
-	_ = filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] && path != repo {
-				return filepath.SkipDir
-			}
-			return nil
+	for _, path := range paths {
+		rel := filterRelPath(opts.Repo, path)
+		if shouldSkip(rel) {
+			continue
 		}
 		absPath, _ := filepath.Abs(path)
 		if absOut != "" && absPath == absOut {
-			return nil
+			continue
 		}
-		info, err := d.Info()
+		info, err := os.Stat(path)
 		if err != nil {
-			return nil
+			continue
 		}
 		if info.ModTime().After(newest) {
 			newest = info.ModTime()
-			if rel, err := filepath.Rel(repo, path); err == nil {
-				newestPath = filepath.ToSlash(rel)
-			} else {
-				newestPath = filepath.ToSlash(path)
-			}
+			newestPath = rel
 		}
-		return nil
-	})
+	}
 	return newest, newestPath
 }
 
@@ -299,7 +297,7 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	report.FreshnessHint = existingReportFreshnessHint(opts)
+	report.FreshnessHint = existingReportFreshnessHint(ctx, opts)
 	if opts.Cull {
 		ledger := BuildCullLedger(report)
 		report.CullLedger = &ledger
@@ -318,7 +316,7 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 		_, err = stdout.Write(output)
 		return err
 	}
-	if err := os.WriteFile(opts.Out, output, 0o644); err != nil {
+	if err := atomicWriteFile(opts.Out, output, 0o644); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 	fmt.Fprintf(stdout, "slither wrote %s with %d report rows and %d ranked files\n", opts.Out, report.FilesScored, len(rankedMarkdownRows(report.Rows)))

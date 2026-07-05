@@ -92,13 +92,7 @@ type batchModelScore struct {
 	Reasons []string `json:"reasons"`
 }
 
-func batchScoringPrompt(batch []FileEvidence) string {
-	projections := make([]scoringEvidence, len(batch))
-	for i, e := range batch {
-		projections[i] = projectEvidence(i, e)
-	}
-	payload, _ := json.MarshalIndent(projections, "", "  ")
-	return fmt.Sprintf(`You are Slither, a cheap-model scout. Score each file as a premium-model target.
+const batchScoringPromptTemplate = `You are Slither, a cheap-model scout. Score each file as a premium-model target.
 
 Return only a compact JSON array, one object per file, keyed by the file's index:
 [{"index":0,"score":3,"summary":"one sentence","reasons":["short evidence reason"]}]
@@ -109,7 +103,15 @@ Prefer files with impact times opportunity: central code, security/config/persis
 Score every index exactly once. Do not invent evidence outside this payload.
 
 Files:
-%s`, string(payload))
+%s`
+
+func batchScoringPrompt(batch []FileEvidence) string {
+	projections := make([]scoringEvidence, len(batch))
+	for i, e := range batch {
+		projections[i] = projectEvidence(i, e)
+	}
+	payload, _ := json.MarshalIndent(projections, "", "  ")
+	return fmt.Sprintf(batchScoringPromptTemplate, string(payload))
 }
 
 func parseModelScores(raw string) ([]batchModelScore, error) {

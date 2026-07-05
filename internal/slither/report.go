@@ -511,32 +511,100 @@ func buildWhyTopEntries(rows []FileEvidence, limit int) []WhyTopEntry {
 	entries := make([]WhyTopEntry, 0, len(rankedRows))
 	for i, row := range rankedRows {
 		entries = append(entries, WhyTopEntry{
-			Rank:          i + 1,
-			Path:          row.Path,
-			Score:         row.Score,
-			Confidence:    row.Confidence,
-			Actionability: actionabilityForRow(row),
-			Evidence:      append([]string(nil), row.EvidenceLayers...),
-			Reasons:       topReasons(row, 5),
-			VerifyCmd:     row.VerifyCmd,
-			Note:          rowNote(row),
+			Rank:           i + 1,
+			Path:           row.Path,
+			Score:          row.Score,
+			Confidence:     row.Confidence,
+			Actionability:  actionabilityForRow(row),
+			Evidence:       append([]string(nil), row.EvidenceLayers...),
+			Reasons:        topReasons(row, 5),
+			ScoreBreakdown: scoreBreakdownForRow(row),
+			VerifyCmd:      row.VerifyCmd,
+			Note:           rowNote(row),
 		})
 	}
 	return entries
 }
 
+func scoreBreakdownForRow(row FileEvidence) []WhyTopScoreComponent {
+	components := []WhyTopScoreComponent{
+		{Name: "score", Value: float64(row.Score)},
+		{Name: "seed_score", Value: row.SeedScore},
+		{Name: "evidence_layers", Value: float64(len(row.EvidenceLayers))},
+	}
+	riskComponents := []WhyTopScoreComponent{
+		{Name: "path_risk", Value: float64(row.PathRisk)},
+		{Name: "content_risk", Value: float64(row.ContentRisk)},
+		{Name: "architecture_smell", Value: float64(row.SmellRisk)},
+		{Name: "hotspot_risk", Value: float64(row.HotspotRisk)},
+		{Name: "sdk_dx_risk", Value: float64(row.SDKDXRisk)},
+		{Name: "unknowns_risk", Value: float64(row.UnknownsRisk)},
+		{Name: "env_contract_risk", Value: float64(row.EnvContractRisk)},
+		{Name: "workflow_security_risk", Value: float64(row.WorkflowSecurityRisk)},
+		{Name: "migration_safety_risk", Value: float64(row.MigrationSafetyRisk)},
+		{Name: "container_build_risk", Value: float64(row.ContainerBuildRisk)},
+		{Name: "kubernetes_security_risk", Value: float64(row.KubernetesSecurityRisk)},
+		{Name: "terraform_security_risk", Value: float64(row.TerraformSecurityRisk)},
+		{Name: "openapi_contract_risk", Value: float64(row.OpenAPIContractRisk)},
+		{Name: "cors_security_risk", Value: float64(row.CORSSecurityRisk)},
+		{Name: "cookie_security_risk", Value: float64(row.CookieSecurityRisk)},
+		{Name: "dependency_health_risk", Value: float64(row.DependencyHealthRisk)},
+		{Name: "centrality_risk", Value: float64(row.CentralityRisk)},
+		{Name: "cochange_risk", Value: float64(row.CochangeRisk)},
+		{Name: "ownership_risk", Value: float64(row.OwnershipRisk)},
+		{Name: "flake_risk", Value: float64(row.FlakeRisk)},
+		{Name: "oracle_risk", Value: float64(row.OracleRisk)},
+		{Name: "stale_marker_risk", Value: float64(row.StaleMarkerRisk)},
+	}
+	sort.SliceStable(riskComponents, func(i, j int) bool {
+		if riskComponents[i].Value != riskComponents[j].Value {
+			return riskComponents[i].Value > riskComponents[j].Value
+		}
+		return riskComponents[i].Name < riskComponents[j].Name
+	})
+	for _, component := range riskComponents {
+		if component.Value == 0 {
+			continue
+		}
+		components = append(components, component)
+		if len(components) == 8 {
+			break
+		}
+	}
+	return components
+}
+
 func writeWhyTopMarkdown(b *strings.Builder, entries []WhyTopEntry) {
 	fmt.Fprintf(b, "## Why Top %d\n\n", len(entries))
-	fmt.Fprintf(b, "| rank | file | why | verify |\n")
-	fmt.Fprintf(b, "| ---: | --- | --- | --- |\n")
+	fmt.Fprintf(b, "| rank | file | why | score breakdown | verify |\n")
+	fmt.Fprintf(b, "| ---: | --- | --- | --- | --- |\n")
 	for _, entry := range entries {
 		why := compactList(append(entry.Evidence, entry.Reasons...), 6)
 		if entry.Note != "" {
 			why = strings.TrimSpace(why + "; " + entry.Note)
 		}
-		fmt.Fprintf(b, "| %d | `%s` | %s | %s |\n", entry.Rank, entry.Path, escapeCell(why), cellOrDash(entry.VerifyCmd))
+		fmt.Fprintf(
+			b,
+			"| %d | `%s` | %s | %s | %s |\n",
+			entry.Rank,
+			entry.Path,
+			escapeCell(why),
+			escapeCell(formatScoreBreakdown(entry.ScoreBreakdown)),
+			cellOrDash(entry.VerifyCmd),
+		)
 	}
 	fmt.Fprintf(b, "\n")
+}
+
+func formatScoreBreakdown(components []WhyTopScoreComponent) string {
+	if len(components) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(components))
+	for _, component := range components {
+		parts = append(parts, component.Name+"="+formatFloat(component.Value))
+	}
+	return compactList(parts, 6)
 }
 
 func RenderJSON(report Report) ([]byte, error) {

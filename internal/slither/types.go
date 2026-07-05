@@ -152,15 +152,21 @@ type ReportFilters struct {
 }
 
 type WhyTopEntry struct {
-	Rank          int           `json:"rank"`
-	Path          string        `json:"path"`
-	Score         int           `json:"score"`
-	Confidence    string        `json:"confidence,omitempty"`
-	Actionability Actionability `json:"actionability,omitempty"`
-	Evidence      []string      `json:"evidence,omitempty"`
-	Reasons       []string      `json:"reasons,omitempty"`
-	VerifyCmd     string        `json:"verify_cmd,omitempty"`
-	Note          string        `json:"note,omitempty"`
+	Rank           int                    `json:"rank"`
+	Path           string                 `json:"path"`
+	Score          int                    `json:"score"`
+	Confidence     string                 `json:"confidence,omitempty"`
+	Actionability  Actionability          `json:"actionability,omitempty"`
+	Evidence       []string               `json:"evidence,omitempty"`
+	Reasons        []string               `json:"reasons,omitempty"`
+	ScoreBreakdown []WhyTopScoreComponent `json:"score_breakdown,omitempty"`
+	VerifyCmd      string                 `json:"verify_cmd,omitempty"`
+	Note           string                 `json:"note,omitempty"`
+}
+
+type WhyTopScoreComponent struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
 }
 
 // CacheStats reports score-cache effectiveness for a run. Nil (omitted) when

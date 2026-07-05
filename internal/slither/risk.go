@@ -33,8 +33,6 @@ type scoringPatterns struct {
 	Source          string
 }
 
-
-
 func loadScoringPatterns(path string) (scoringPatterns, error) {
 	if path == "" {
 		patterns, err := parseScoringPatterns(embeddedTriagePatterns, "embedded:triage_patterns.json")
@@ -143,14 +141,14 @@ func contentRisk(patterns scoringPatterns, rel, text string) (int, []string) {
 }
 
 func contentRiskWithLocations(patterns scoringPatterns, rel, text string) (int, []string, []EvidenceLocation) {
-	if contentPatternSkipped(rel) {
-		return 0, nil, nil
-	}
 	text = textWithoutDetectorLiterals(text)
 	score := 0
 	var reasons []string
 	var locations []EvidenceLocation
 	for _, match := range contentPatternMatches(patterns, text) {
+		if contentPatternSkipped(rel, match.pattern.ID) {
+			continue
+		}
 		score += match.count * match.pattern.Weight
 		reason := "content:" + match.pattern.ID + ":" + itoa(match.count)
 		reasons = append(reasons, reason)
@@ -229,7 +227,10 @@ func lineSnippetAt(text string, index int) string {
 	return strings.TrimSpace(text[start:end])
 }
 
-func contentPatternSkipped(rel string) bool {
+func contentPatternSkipped(rel, patternID string) bool {
+	if isSecretPatternID(patternID) {
+		return false
+	}
 	switch strings.ToLower(filepathExt(rel)) {
 	case ".json", ".md", ".toml", ".yaml", ".yml":
 		return true

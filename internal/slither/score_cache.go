@@ -12,11 +12,6 @@ import (
 	"strings"
 )
 
-// promptVersion is mixed into every cache key. Bump it whenever
-// batchScoringPrompt (model_prompt.go) changes so stale entries are invalidated
-// without a manual cache wipe.
-const promptVersion = "2"
-
 // maxCacheEntries caps scores.json so a long-lived cache cannot grow without
 // bound. On persist, entries beyond the cap are pruned, always retaining the
 // keys used (hit or written) this run; cold entries for files no longer scanned
@@ -177,14 +172,18 @@ func scoreCachePersistSkippedSignal(cache *scoreCache) string {
 }
 
 // scoreCacheKey hashes the inputs that determine the model's score: the prompt
-// version, the model ID, the base URL, the fallback models, and the canonical
+// contract, the model ID, the base URL, the fallback models, and the canonical
 // projected evidence. projectEvidence is called with Index 0 because the batch
 // index is positional, not semantic — the same file at a different rank must
 // hash identically.
 func scoreCacheKey(model, baseURL string, fallbackModels []string, e FileEvidence) string {
+	return scoreCacheKeyWithPromptContract(model, baseURL, fallbackModels, batchScoringPromptTemplate, e)
+}
+
+func scoreCacheKeyWithPromptContract(model, baseURL string, fallbackModels []string, promptContract string, e FileEvidence) string {
 	payload, _ := json.Marshal(projectEvidence(0, e))
 	h := sha256.New()
-	h.Write([]byte(promptVersion))
+	h.Write([]byte(promptContract))
 	h.Write([]byte{0})
 	h.Write([]byte(model))
 	h.Write([]byte{0})
