@@ -37,6 +37,14 @@ func TestScoreCacheKeyStableAndSensitive(t *testing.T) {
 	}
 }
 
+func TestScoreCacheKeyChangesWithPromptContract(t *testing.T) {
+	t.Parallel()
+	row := baseEvidence("x.go", 2)
+	if scoreCacheKeyWithPromptContract("m", "", nil, "prompt-a", row) == scoreCacheKeyWithPromptContract("m", "", nil, "prompt-b", row) {
+		t.Fatal("key did not change with prompt contract")
+	}
+}
+
 func TestScoreTopRowsCachedHitSkipsGenerate(t *testing.T) {
 	t.Parallel()
 	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}}

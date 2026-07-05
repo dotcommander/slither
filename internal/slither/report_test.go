@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
@@ -49,7 +50,7 @@ func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
 
 func TestBuildReportClassifiesContentSecretsAsSecretRisk(t *testing.T) {
 	tmp := t.TempDir()
-	writeFile(t, tmp, "main.go", "package main\n\nconst token = \"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
+	writeFile(t, tmp, "main.go", "package main\n\nconst token = YOUR_API_KEY"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
 
 	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 1000})
 	if err != nil {
@@ -335,6 +336,16 @@ func TestBuildReportFiltersFocusIncludeExcludeAndWhyTop(t *testing.T) {
 	}
 	if len(report.WhyTop) != 1 || report.WhyTop[0].Path != "internal/database/db.go" {
 		t.Fatalf("why_top = %#v, want focused top row", report.WhyTop)
+	}
+	if len(report.WhyTop[0].ScoreBreakdown) == 0 || report.WhyTop[0].ScoreBreakdown[0].Name != "score" {
+		t.Fatalf("why_top score breakdown missing stable score lead: %#v", report.WhyTop[0].ScoreBreakdown)
+	}
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"score_breakdown"`) {
+		t.Fatalf("json missing why_top score_breakdown:\n%s", data)
 	}
 	if report.Filters.Focus == "" || len(report.Filters.Include) != 1 || len(report.Filters.Exclude) != 1 {
 		t.Fatalf("filters not preserved in report: %#v", report.Filters)
@@ -1610,6 +1621,65 @@ func TestRunReportCompletionReportsRowsAndRankedFiles(t *testing.T) {
 	}
 }
 
+func TestRunReportFreshnessRespectsIncludeFilters(t *testing.T) {
+	setTempConfigDir(t)
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "report.md")
+	writeFile(t, tmp, "internal/a.go", "package internal\n\nfunc A(){}\n")
+	writeFile(t, tmp, "docs/new.md", "new docs\n")
+	if err := os.WriteFile(out, []byte("old report\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldSource := time.Date(2026, 1, 1, 1, 1, 0, 0, time.UTC)
+	reportTime := time.Date(2026, 3, 3, 3, 3, 0, 0, time.UTC)
+	newDocs := time.Date(2026, 4, 4, 4, 4, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(tmp, "internal/a.go"), oldSource, oldSource); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(out, reportTime, reportTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(tmp, "docs/new.md"), newDocs, newDocs); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout strings.Builder
+	err := Run(context.Background(), []string{"report", tmp, "--include", "internal/**", "--out", out, "--top", "5"}, &stdout, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := readTextFile(t, out)
+	if strings.Contains(report, "docs/new.md") {
+		t.Fatalf("freshness should not cite excluded docs file:\n%s", report)
+	}
+	if !strings.Contains(report, "existing output was current relative to scanned files before this run") {
+		t.Fatalf("freshness should be computed from included scan files:\n%s", report)
+	}
+}
+
+func TestRunReportWritesReportWithoutAtomicTempLitter(t *testing.T) {
+	setTempConfigDir(t)
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "report.md")
+	writeFile(t, tmp, "internal/a.go", "package internal\n\nfunc A(){ panic(\"x\") }\n")
+
+	var stdout strings.Builder
+	err := Run(context.Background(), []string{"report", tmp, "--out", out, "--top", "5"}, &stdout, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("report not written: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(tmp, "report.md.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary report files left behind: %v", matches)
+	}
+}
+
 func TestRunReportDefaultsToDeterministicFallback(t *testing.T) {
 	setTempConfigDir(t)
 	tmp := t.TempDir()
@@ -1690,7 +1760,7 @@ func TestContentRiskIgnoresDetectorLiterals(t *testing.T) {
 	}
 
 	// Genuine secret line must still be detected.
-	tokenText := "package main\nconst k = \"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n"
+	tokenText := "package main\nconst k = \"YOUR_API_KEY\"\n"
 	tokenScore, tokenReasons := contentRisk(patterns, "main.go", tokenText)
 	if tokenScore == 0 {
 		t.Fatalf("token literal score = 0, want > 0; reasons=%#v", tokenReasons)
@@ -1958,13 +2028,13 @@ const password = "YOUR_PASSWORD"
 		},
 		{
 			name: "credential literal flags plausible secret",
-			text: `const apiKey = "sk-aaaaaaaaaaaaaaaaaaaaaaaa"
+			text: `const apiKey = "YOUR_API_KEY"
 `,
 			want: []string{"credential_assignment_literal"},
 		},
 		{
 			name:      "max matches caps repeated token literals",
-			text:      strings.Repeat("sk-aaaaaaaaaaaaaaaaaaaaaaaa\n", 8),
+			text:      strings.Repeat("YOUR_API_KEY\n", 8),
 			want:      []string{"provider_token_literal"},
 			wantCount: map[string]int{"provider_token_literal": 5},
 		},

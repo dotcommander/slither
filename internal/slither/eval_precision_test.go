@@ -50,6 +50,88 @@ var scoutGroundTruth = []struct {
 	{"primitives/textutil/locate.go", "noise"},
 }
 
+type scoutCalibrationReport struct {
+	Labeled              int
+	Found                int
+	Missing              int
+	TopK                 int
+	NoiseInTopK          int
+	ConfirmedInTopK      int
+	LikelyInTopK         int
+	DistinctScoresInTopK int
+	TotalRows            int
+	ConfirmedRanks       []int
+	NoiseTopKRate        float64
+	ConfirmedTopKRecall  float64
+	ConfirmedFoundRecall float64
+	LabeledCoverage      float64
+	TopKScoreSaturation  float64
+}
+
+func buildScoutCalibrationReport(rows []FileEvidence, groundTruth []struct {
+	Path    string
+	Verdict string
+}, topK int) scoutCalibrationReport {
+	rankByPath := make(map[string]int, len(rows))
+	for i, r := range rows {
+		rankByPath[r.Path] = i
+	}
+
+	report := scoutCalibrationReport{
+		Labeled:   len(groundTruth),
+		TopK:      topK,
+		TotalRows: len(rows),
+	}
+	var confirmedTotal, confirmedFound int
+	for _, gt := range groundTruth {
+		if gt.Verdict == "confirmed" {
+			confirmedTotal++
+		}
+		rank, ok := rankByPath[gt.Path]
+		if !ok {
+			report.Missing++
+			continue
+		}
+		report.Found++
+		inTopK := rank < topK
+		switch gt.Verdict {
+		case "noise":
+			if inTopK {
+				report.NoiseInTopK++
+			}
+		case "confirmed":
+			confirmedFound++
+			report.ConfirmedRanks = append(report.ConfirmedRanks, rank)
+			if inTopK {
+				report.ConfirmedInTopK++
+			}
+		case "likely":
+			if inTopK {
+				report.LikelyInTopK++
+			}
+		}
+	}
+
+	distinct := map[int]struct{}{}
+	for i := 0; i < topK && i < len(rows); i++ {
+		distinct[rows[i].Score] = struct{}{}
+	}
+	report.DistinctScoresInTopK = len(distinct)
+	report.NoiseTopKRate = ratio(report.NoiseInTopK, topK)
+	report.ConfirmedTopKRecall = ratio(report.ConfirmedInTopK, confirmedTotal)
+	report.ConfirmedFoundRecall = ratio(confirmedFound, confirmedTotal)
+	report.LabeledCoverage = ratio(report.Found, report.Labeled)
+	report.TopKScoreSaturation = 1 - ratio(report.DistinctScoresInTopK, min(topK, len(rows)))
+	return report
+}
+
+func ratio(numerator, denominator int) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
 func TestScoutPrecisionReliquary(t *testing.T) {
 	repo := os.Getenv("SLITHER_EVAL_REPO")
 	if repo == "" {
@@ -79,46 +161,24 @@ func TestScoutPrecisionReliquary(t *testing.T) {
 	}
 
 	const topK = 15
-	var (
-		found, missing               int
-		noiseInTopK, confirmedInTopK int
-		confirmedRanks               []int
-	)
 	for _, gt := range scoutGroundTruth {
 		rank, ok := rankByPath[gt.Path]
 		if !ok {
-			missing++
 			t.Logf("  [not ranked] %-48s verdict=%s", gt.Path, gt.Verdict)
 			continue
-		}
-		found++
-		inTopK := rank < topK
-		switch gt.Verdict {
-		case "noise":
-			if inTopK {
-				noiseInTopK++
-			}
-		case "confirmed":
-			confirmedRanks = append(confirmedRanks, rank)
-			if inTopK {
-				confirmedInTopK++
-			}
 		}
 		t.Logf("  rank=%3d score=%d verdict=%-9s %s", rank, scoreByPath[gt.Path], gt.Verdict, gt.Path)
 	}
 
-	// Distinct scores in the top-K is a saturation indicator (1 == fully saturated).
-	distinct := map[int]struct{}{}
-	for i := 0; i < topK && i < len(rows); i++ {
-		distinct[rows[i].Score] = struct{}{}
-	}
-
-	t.Logf("SCOUT-EVAL summary: labeled=%d found=%d missing=%d | noise_in_top%d=%d confirmed_in_top%d=%d | distinct_scores_in_top%d=%d total_rows=%d",
-		len(scoutGroundTruth), found, missing, topK, noiseInTopK, topK, confirmedInTopK, topK, len(distinct), len(rows))
+	calibration := buildScoutCalibrationReport(rows, scoutGroundTruth, topK)
+	t.Logf("SCOUT-EVAL summary: labeled=%d found=%d missing=%d | noise_in_top%d=%d confirmed_in_top%d=%d likely_in_top%d=%d | distinct_scores_in_top%d=%d total_rows=%d",
+		calibration.Labeled, calibration.Found, calibration.Missing, topK, calibration.NoiseInTopK, topK, calibration.ConfirmedInTopK, topK, calibration.LikelyInTopK, topK, calibration.DistinctScoresInTopK, calibration.TotalRows)
+	t.Logf("SCOUT-CALIBRATION rates: labeled_coverage=%.2f confirmed_found_recall=%.2f confirmed_top%d_recall=%.2f noise_top%d_rate=%.2f score_saturation_top%d=%.2f",
+		calibration.LabeledCoverage, calibration.ConfirmedFoundRecall, topK, calibration.ConfirmedTopKRecall, topK, calibration.NoiseTopKRate, topK, calibration.TopKScoreSaturation)
 
 	// Recall guard: the one confirmed concern must stay present in the ranking.
 	// Threshold-based noise assertions are added once the IDF/calibration passes land.
-	if len(confirmedRanks) == 0 {
+	if len(calibration.ConfirmedRanks) == 0 {
 		t.Errorf("confirmed concern primitives/vectors/pq/pq.go not present in ranked rows — tuning must not bury it")
 	}
 }
