@@ -16,10 +16,11 @@ go run ./cmd/slither report /path/to/repo
 
 ## Command
 
-There is one command: `report`.
+There are two commands: `report` and `version`.
 
 ```
 slither report [repo] [flags]
+slither version [--build]
 ```
 
 `repo` defaults to the current directory (`.`).
@@ -29,7 +30,7 @@ slither report [repo] [flags]
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--out` | `slither-report.md` | Output path; `-` writes to stdout. Switches to `slither-report.json` automatically when `--json` is set and `--out` is left at its default. |
-| `--top` | `80` | Maximum rows to include in the report. Must be positive. |
+| `--top` | `80` | Target number of ranked production files. Separated documentation, test, generated, and completeness rows may make the JSON evidence set larger. Must be positive. |
 | `--max-bytes` | `500000` | Maximum bytes inspected per file. Must be positive. |
 | `--days` | `90` | History window (days) for churn and bug-fix signals. Must be positive. |
 | `--patterns` | (embedded) | Path to a JSON path/content pattern file. Overrides the embedded `premium-model-triage` catalog. |
@@ -137,7 +138,9 @@ flags or editing source:
   or over quota, wormhole fails over to the next. Ignored under `--local`.
 - **Score cache:** model scores are cached at `~/.config/slither/cache/scores.json`,
   keyed by file evidence + model, so re-runs skip unchanged files. Pass `--no-cache`
-  to disable. A missing or corrupt cache is ignored, never fatal.
+  to disable. A missing or corrupt cache is ignored, never fatal. New cache and
+  report files are owner-readable only (`0600`); replacing an existing file never
+  broadens stricter permissions.
 
 ## Output
 
@@ -172,6 +175,10 @@ Each evidence row carries an `actionability` value in Markdown and JSON:
 `actionability` is deterministic and derived from the row evidence. It is
 separate from `cull_decision`: culling decides which bucket a row belongs in;
 actionability describes how a reviewer should treat that row inside any bucket.
+Candidate verification commands use POSIX-shell quoting for repository-controlled
+arguments. When a path contains a carriage return or newline, Slither omits any
+candidate command that would need to embed that path because no portable, exact
+one-line shell representation exists; path-independent package commands may remain.
 
 ### JSON envelope (`--json`)
 
