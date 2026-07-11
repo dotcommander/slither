@@ -14,16 +14,11 @@ func TestSecretEvidenceRedactedInReport(t *testing.T) {
 
 	tmp := t.TempDir()
 
-	fixture := `package main
-
-const token = "YOUR_API_KEY"
-
-func config() {
-	password := "mySuperSecret123!"
-	exec.Command("sh", "-c", password)
-	_ = password
-}
-`
+	providerToken := "sk-" + strings.Repeat("a", 24)
+	password := "prod-" + strings.Repeat("xY7", 6)
+	fixture := "package main\n\nconst token = \"" + providerToken + "\"\n\n" +
+		"func config() {\n\tpassword := \"" + password + "\"\n" +
+		"\texec.Command(\"sh\", \"-c\", password)\n\t_ = password\n}\n"
 	writeFile(t, tmp, "secrets.go", fixture)
 
 	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 500_000, Days: 90})
@@ -64,10 +59,10 @@ func config() {
 		t.Fatal(err)
 	}
 	raw := string(data)
-	if strings.Contains(raw, "YOUR_API_KEY") {
+	if strings.Contains(raw, providerToken) {
 		t.Fatal("provider token literal leaked into rendered JSON")
 	}
-	if strings.Contains(raw, "mySuperSecret123!") {
+	if strings.Contains(raw, password) {
 		t.Fatal("credential literal leaked into rendered JSON")
 	}
 }
@@ -145,7 +140,8 @@ func TestConfigFormatSecretsAreDetectedAndRedacted(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir()
-	writeFile(t, tmp, "settings.yaml", "api_key: YOUR_API_KEY"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
+	secret := "sk-" + strings.Repeat("a", 24)
+	writeFile(t, tmp, "settings.yaml", "api_key: \""+secret+"\"\n")
 
 	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 500_000, Days: 90})
 	if err != nil {

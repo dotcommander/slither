@@ -50,7 +50,8 @@ func TestBuildReportFallbackScoresRiskyFiles(t *testing.T) {
 
 func TestBuildReportClassifiesContentSecretsAsSecretRisk(t *testing.T) {
 	tmp := t.TempDir()
-	writeFile(t, tmp, "main.go", "package main\n\nconst token = YOUR_API_KEY"sk-aaaaaaaaaaaaaaaaaaaaaaaa\"\n")
+	secret := "sk-" + strings.Repeat("a", 24)
+	writeFile(t, tmp, "main.go", "package main\n\nconst token = \""+secret+"\"\n")
 
 	report, err := BuildReport(context.Background(), Options{Repo: tmp, Top: 10, MaxBytes: 1000})
 	if err != nil {
@@ -1763,7 +1764,7 @@ func TestContentRiskIgnoresDetectorLiterals(t *testing.T) {
 	}
 
 	// Genuine secret line must still be detected.
-	tokenText := "package main\nconst k = \"YOUR_API_KEY\"\n"
+	tokenText := "package main\nconst k = \"sk-" + strings.Repeat("a", 24) + "\"\n"
 	tokenScore, tokenReasons := contentRisk(patterns, "main.go", tokenText)
 	if tokenScore == 0 {
 		t.Fatalf("token literal score = 0, want > 0; reasons=%#v", tokenReasons)
@@ -1977,6 +1978,8 @@ func TestEmbeddedPatternPrecisionFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	credentialSecret := "prod-" + strings.Repeat("xY7", 6)
+	providerToken := "sk-" + strings.Repeat("a", 24)
 
 	tests := []struct {
 		name      string
@@ -2031,13 +2034,12 @@ const password = "YOUR_PASSWORD"
 		},
 		{
 			name: "credential literal flags plausible secret",
-			text: `const apiKey = "YOUR_API_KEY"
-`,
+			text: "const apiKey = \"" + credentialSecret + "\"\n",
 			want: []string{"credential_assignment_literal"},
 		},
 		{
 			name:      "max matches caps repeated token literals",
-			text:      strings.Repeat("YOUR_API_KEY\n", 8),
+			text:      strings.Repeat(providerToken+"\n", 8),
 			want:      []string{"provider_token_literal"},
 			wantCount: map[string]int{"provider_token_literal": 5},
 		},
