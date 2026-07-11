@@ -3,9 +3,11 @@ package slither
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -49,7 +51,7 @@ func TestScoreTopRowsCachedHitSkipsGenerate(t *testing.T) {
 	t.Parallel()
 	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}}
 	row := baseEvidence("a.go", 2)
-	cache.entries[scoreCacheKey("m", "", nil, row)] = cachedScore{Score: 5, Summary: "cached", Reasons: []string{"rc"}}
+	cache.entries[scoreCacheKey("m", "", nil, row)] = cachedScore{Score: 5, Summary: "cached", ModelReasons: []string{"rc"}}
 	s := &ModelScorer{model: "m", generate: func(_ context.Context, _ string, _ int) (string, error) {
 		t.Fatal("generate called for a cached row")
 		return "", nil
@@ -61,6 +63,44 @@ func TestScoreTopRowsCachedHitSkipsGenerate(t *testing.T) {
 	}
 	if !hasLayer(rows[0].EvidenceLayers, "model") || hasLayer(rows[0].EvidenceLayers, "cache") {
 		t.Fatalf("layers = %v, want model and NOT cache (transparency)", rows[0].EvidenceLayers)
+	}
+	if !stringSliceContains(rows[0].Reasons, "content:x") || !stringSliceContains(rows[0].Reasons, "model:rc") {
+		t.Fatalf("cached reasons = %#v, want deterministic and namespaced model reasons", rows[0].Reasons)
+	}
+}
+
+func TestScoreTopRowsCachedColdWarmParity(t *testing.T) {
+	t.Parallel()
+	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}}
+	row := baseEvidence("a.go", 2)
+	s := &ModelScorer{model: "m", generate: func(_ context.Context, _ string, _ int) (string, error) {
+		return `[{"index":0,"score":4,"summary":"fresh","reasons":["review auth flow"]}]`, nil
+	}}
+	cold := []FileEvidence{row}
+	if _, _, err := scoreTopRowsCached(context.Background(), s, cold, cache); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := cache.lookup(scoreCacheKey("m", "", nil, row))
+	if !ok || !reflect.DeepEqual(stored.ModelReasons, []string{"review auth flow"}) {
+		t.Fatalf("cached model reasons = %#v ok=%v, want only model-owned reason", stored.ModelReasons, ok)
+	}
+	warm := []FileEvidence{row}
+	if _, _, err := scoreTopRowsCached(context.Background(), s, warm, cache); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cold, warm) {
+		t.Fatalf("cold/warm mismatch:\ncold=%#v\nwarm=%#v", cold, warm)
+	}
+}
+
+func TestScoreTopRowsCachedParentCancellationPropagates(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cache := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}}
+	_, _, err := scoreTopRowsCached(ctx, &ModelScorer{model: "m"}, []FileEvidence{baseEvidence("a.go", 2)}, cache)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("scoreTopRowsCached error = %v, want context.Canceled", err)
 	}
 }
 

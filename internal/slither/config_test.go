@@ -144,8 +144,45 @@ func TestResolveReportOptionsFlagOverridesConfig(t *testing.T) {
 	if opts.BaseURL != "https://flag.test/v1" {
 		t.Fatalf("base url = %q, want flag override", opts.BaseURL)
 	}
+	if opts.APIKeyEnv != "" {
+		t.Fatalf("api key env = %q, want no credential inherited by a custom endpoint", opts.APIKeyEnv)
+	}
+}
+
+func TestResolveReportOptionsMatchingBaseURLKeepsConfigCredential(t *testing.T) {
+	t.Parallel()
+	cfg := Config{Model: "config-model", BaseURL: "https://config.test/v1", APIKeyEnv: "CONFIG_KEY"}
+	opts, err := resolveReportOptions(cfg, []string{"--base-url", cfg.BaseURL, "."})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if opts.APIKeyEnv != "CONFIG_KEY" {
-		t.Fatalf("api key env = %q, want config fallback", opts.APIKeyEnv)
+		t.Fatalf("api key env = %q, want matching profile credential", opts.APIKeyEnv)
+	}
+}
+
+func TestResolveReportOptionsCustomBaseURLKeepsExplicitCredential(t *testing.T) {
+	t.Parallel()
+	cfg := Config{Model: "config-model", BaseURL: "https://config.test/v1", APIKeyEnv: "CONFIG_KEY"}
+	opts, err := resolveReportOptions(cfg, []string{"--base-url", "https://custom.test/v1", "--api-key-env", "CUSTOM_KEY", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.APIKeyEnv != "CUSTOM_KEY" {
+		t.Fatalf("api key env = %q, want explicit credential", opts.APIKeyEnv)
+	}
+}
+
+func TestResolveReportOptionsLocalCustomBaseDoesNotInheritCredential(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.Local.APIKeyEnv = "LOCAL_KEY"
+	opts, err := resolveReportOptions(cfg, []string{"--local", "--base-url", "https://custom.test/v1", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.APIKeyEnv != "" {
+		t.Fatalf("api key env = %q, want no local credential inherited by custom endpoint", opts.APIKeyEnv)
 	}
 }
 

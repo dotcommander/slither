@@ -3,8 +3,15 @@ package slither
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func baseEvidence(path string, score int) FileEvidence {
@@ -57,6 +64,9 @@ func TestScoreBatchMapsResultsByIndex(t *testing.T) {
 	if !hasLayer(out[0].EvidenceLayers, "content-risk") {
 		t.Fatalf("deterministic layer lost: %+v", out[0].EvidenceLayers)
 	}
+	if !stringSliceContains(out[0].Reasons, "content:x") || !stringSliceContains(out[0].Reasons, "model:ra") {
+		t.Fatalf("row0 reasons = %#v, want deterministic and namespaced model reasons", out[0].Reasons)
+	}
 }
 
 func TestScoreBatchMissingIndexFallsBack(t *testing.T) {
@@ -65,7 +75,10 @@ func TestScoreBatchMissingIndexFallsBack(t *testing.T) {
 	s := &ModelScorer{generate: func(_ context.Context, _ string, _ int) (string, error) {
 		return `[{"index":0,"score":5,"summary":"a","reasons":["ra"]}]`, nil
 	}}
-	out, _ := s.ScoreBatch(context.Background(), rows)
+	out, err := s.ScoreBatch(context.Background(), rows)
+	if err != nil {
+		t.Fatalf("missing model index should degrade, got error: %v", err)
+	}
 	if out[1].Score != 2 {
 		t.Fatalf("missing-index score = %d, want deterministic 2", out[1].Score)
 	}
@@ -80,7 +93,10 @@ func TestScoreBatchCallErrorDegradesAll(t *testing.T) {
 	s := &ModelScorer{generate: func(_ context.Context, _ string, _ int) (string, error) {
 		return "", context.DeadlineExceeded
 	}}
-	out, _ := s.ScoreBatch(context.Background(), rows)
+	out, err := s.ScoreBatch(context.Background(), rows)
+	if err != nil {
+		t.Fatalf("provider timeout should degrade, got error: %v", err)
+	}
 	if out[0].Score != 4 || out[1].Score != 3 {
 		t.Fatalf("degraded scores changed: %d/%d", out[0].Score, out[1].Score)
 	}
@@ -135,7 +151,9 @@ func TestScoreTopRowsPreservesOrderAndCount(t *testing.T) {
 		b, _ := json.Marshal(out)
 		return string(b), nil
 	}}
-	scoreTopRows(context.Background(), s, rows, modelBatchSize, modelScoreConcurrency)
+	if err := scoreTopRows(context.Background(), s, rows, modelBatchSize, modelScoreConcurrency); err != nil {
+		t.Fatal(err)
+	}
 	for i := range rows {
 		want := "f" + itoa(i) + ".go"
 		if rows[i].Path != want {
@@ -144,6 +162,75 @@ func TestScoreTopRowsPreservesOrderAndCount(t *testing.T) {
 		if rows[i].Summary != want {
 			t.Fatalf("row %d summary = %q, want %q (batch mis-mapped)", i, rows[i].Summary, want)
 		}
+	}
+}
+
+func TestScoreBatchParentCancellationPropagates(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &ModelScorer{generate: func(_ context.Context, _ string, _ int) (string, error) {
+		cancel()
+		return "", context.Canceled
+	}}
+	out, err := s.ScoreBatch(ctx, []FileEvidence{baseEvidence("a.go", 4)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScoreBatch error = %v, want context.Canceled", err)
+	}
+	if hasModelError(out[0].Reasons) {
+		t.Fatalf("parent cancellation degraded into model_error: %#v", out[0].Reasons)
+	}
+}
+
+func TestScoreTopRowsParentCancellationPropagates(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := scoreTopRows(ctx, &ModelScorer{}, []FileEvidence{baseEvidence("a.go", 2)}, 1, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("scoreTopRows error = %v, want context.Canceled", err)
+	}
+}
+
+func TestBuildReportModelPhaseParentCancellationPropagates(t *testing.T) {
+	t.Setenv("SLITHER_TEST_API_KEY", "test-key")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() { close(started) })
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\nfunc evalInput(v string) { eval(v) }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := BuildReport(ctx, Options{Repo: repo, Model: "test-model", BaseURL: server.URL, APIKeyEnv: "SLITHER_TEST_API_KEY", Top: 1, NoCache: true})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		cancel()
+		close(release)
+		t.Fatal("model request did not start")
+	}
+	cancel()
+	close(release)
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("BuildReport error = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("BuildReport did not stop after cancellation")
 	}
 }
 
@@ -179,19 +266,22 @@ func TestNewModelScorerCustomAPIKeyEnvHonored(t *testing.T) {
 	}
 }
 
-func TestNewModelScorerOpenRouterFallsBackToDefaultEnv(t *testing.T) {
+func TestNewModelScorerOpenRouterDoesNotRequireImplicitDefaultEnv(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel; keep this test serial.
 	t.Setenv("OPENROUTER_API_KEY", "sk-default-env")
 	opts := Options{
 		Model:   "primary",
 		BaseURL: "https://openrouter.ai/api/v1",
-		// APIKeyEnv empty -> fall back to WithProviderFromEnv("openrouter")
+		// APIKeyEnv empty must not implicitly select OPENROUTER_API_KEY.
 	}
 	s, err := NewModelScorer(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s == nil {
-		t.Fatal("expected scorer for non-empty model with default env var")
+		t.Fatal("expected scorer for non-empty model without an explicit credential env")
+	}
+	if got := modelAPIKey(opts); got != "" {
+		t.Fatalf("modelAPIKey = %q, want no implicit OPENROUTER_API_KEY", got)
 	}
 }

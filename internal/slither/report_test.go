@@ -352,25 +352,28 @@ func TestBuildReportFiltersFocusIncludeExcludeAndWhyTop(t *testing.T) {
 	}
 }
 
-func TestPathPatternRejectsMultipleDoublestars(t *testing.T) {
-	_, err := pathPatternMatches("a/**/b/**/c.go", "x/y/z.go")
-	if err == nil {
-		t.Fatal("expected error for pattern with multiple **, got nil")
+func TestPathPatternSupportsMultipleDoublestars(t *testing.T) {
+	ok, err := pathPatternMatches("a/**/b/**/c.go", "a/x/b/y/z/c.go")
+	if err != nil || !ok {
+		t.Fatalf("multiple ** match = %v, err = %v; want match", ok, err)
 	}
 }
 
-func TestBuildReportRejectsMultiDoublestarInclude(t *testing.T) {
+func TestBuildReportSupportsMultiDoublestarInclude(t *testing.T) {
 	tmp := t.TempDir()
-	writeFile(t, tmp, "internal/foo/bar.go", "package foo\n")
+	writeFile(t, tmp, "x/one/y/two/z.go", "package foo\n")
 
-	_, err := BuildReport(context.Background(), Options{
+	report, err := BuildReport(context.Background(), Options{
 		Repo:     tmp,
 		Top:      10,
 		MaxBytes: 2000,
 		Include:  []string{"x/**/y/**/z.go"},
 	})
-	if err == nil {
-		t.Fatal("expected error for include pattern with multiple **, got nil")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findRow(report, "x/one/y/two/z.go") == nil {
+		t.Fatalf("multi-doublestar include omitted matching row: %#v", report.Rows)
 	}
 }
 
@@ -2894,7 +2897,10 @@ func TestScoreTopRowsCachedReportsHitMissCounts(t *testing.T) {
 		return `[{"index":0,"score":4,"summary":"fresh","reasons":["r"]}]`, nil
 	}}
 	rows := []FileEvidence{hitRow, missRow}
-	hits, misses := scoreTopRowsCached(context.Background(), s, rows, cache)
+	hits, misses, err := scoreTopRowsCached(context.Background(), s, rows, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if hits != 1 || misses != 1 {
 		t.Fatalf("hits=%d misses=%d, want 1 and 1", hits, misses)
 	}
