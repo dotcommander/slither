@@ -145,42 +145,97 @@ func contentRiskWithLocations(patterns scoringPatterns, rel, text string) (int, 
 	score := 0
 	var reasons []string
 	var locations []EvidenceLocation
+	secretRisk := false
 	for _, match := range contentPatternMatches(patterns, text) {
+		if match.err != nil {
+			reason := "detector_error:" + match.pattern.ID
+			reasons = append(reasons, reason)
+			locations = append(locations, EvidenceLocation{Reason: reason, Snippet: "[detector error]"})
+			continue
+		}
 		if contentPatternSkipped(rel, match.pattern.ID) {
 			continue
 		}
 		score += match.count * match.pattern.Weight
 		reason := "content:" + match.pattern.ID + ":" + itoa(match.count)
 		reasons = append(reasons, reason)
-		snippet := lineSnippetAt(text, match.index)
 		if isSecretPatternID(match.pattern.ID) {
-			snippet = "[redacted]"
+			secretRisk = true
 		}
 		locations = append(locations, EvidenceLocation{
 			Reason:  reason,
 			Line:    lineNumberAt(text, match.index),
-			Snippet: snippet,
+			Snippet: lineSnippetAt(text, match.index),
 		})
 	}
+	if secretRisk {
+		for index := range locations {
+			locations[index].Snippet = "[redacted]"
+		}
+	}
 	return score, reasons, locations
+}
+
+func redactSecretRiskEvidenceLocations(e *FileEvidence) {
+	if e == nil {
+		return
+	}
+	secretRisk := false
+	for _, reason := range e.Reasons {
+		if strings.HasPrefix(reason, "content:") {
+			parts := strings.SplitN(reason, ":", 3)
+			if len(parts) >= 2 && isSecretPatternID(parts[1]) {
+				secretRisk = true
+				break
+			}
+		}
+	}
+	if !secretRisk {
+		return
+	}
+	for index := range e.EvidenceLocations {
+		e.EvidenceLocations[index].Snippet = "[redacted]"
+	}
 }
 
 type contentPatternMatch struct {
 	pattern contentPattern
 	count   int
 	index   int
+	err     error
 }
 
 func contentPatternMatches(patterns scoringPatterns, text string) []contentPatternMatch {
 	matches := make([]contentPatternMatch, 0)
 	for _, item := range patterns.ContentPatterns {
-		count, index, err := countRegexp2Matches(item.Pattern, text, item.MaxMatches)
-		if err != nil || count == 0 {
+		count, runeIndex, err := countRegexp2Matches(item.Pattern, text, item.MaxMatches)
+		if count > 0 {
+			matches = append(matches, contentPatternMatch{
+				pattern: item,
+				count:   count,
+				index:   runeIndexToByteIndex(text, runeIndex),
+			})
+		}
+		if err != nil {
+			matches = append(matches, contentPatternMatch{pattern: item, err: err})
 			continue
 		}
-		matches = append(matches, contentPatternMatch{pattern: item, count: count, index: index})
 	}
 	return matches
+}
+
+func runeIndexToByteIndex(text string, runeIndex int) int {
+	if runeIndex <= 0 {
+		return 0
+	}
+	index := 0
+	for byteIndex := range text {
+		if index == runeIndex {
+			return byteIndex
+		}
+		index++
+	}
+	return len(text)
 }
 
 func countRegexp2Matches(pattern *regexp2.Regexp, text string, maxMatches int) (int, int, error) {

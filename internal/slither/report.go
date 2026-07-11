@@ -3,6 +3,7 @@ package slither
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 	"time"
@@ -59,9 +60,9 @@ func RenderMarkdown(report Report) string {
 	for i, row := range rankedRows {
 		fmt.Fprintf(
 			&b,
-			"| %d | `%s` | %d | %s | %s | %s | %s | %s | %s |\n",
+			"| %d | %s | %d | %s | %s | %s | %s | %s | %s |\n",
 			i+1,
-			row.Path,
+			markdownCodeCell(row.Path),
 			row.Score,
 			cellOrDash(row.Confidence),
 			cellOrDash(string(actionabilityForRow(row))),
@@ -148,9 +149,9 @@ func writeSeparatedRowsMarkdown(b *strings.Builder, title, intro string, rows []
 	for i, row := range rows {
 		fmt.Fprintf(
 			b,
-			"| %d | `%s` | %d | %s | %s | %s | %s | %s |\n",
+			"| %d | %s | %d | %s | %s | %s | %s | %s |\n",
 			i+1,
-			row.Path,
+			markdownCodeCell(row.Path),
 			row.Score,
 			cellOrDash(row.Confidence),
 			cellOrDash(string(actionabilityForRow(row))),
@@ -301,7 +302,7 @@ func startHere(rows []FileEvidence) string {
 	if signals == "" {
 		signals = compactList(row.EvidenceLayers, 3)
 	}
-	return fmt.Sprintf("`%s` (score `%d`, %s)", row.Path, row.Score, escapeCell(signals))
+	return fmt.Sprintf("%s (score `%d`, %s)", markdownCodeCell(row.Path), row.Score, escapeCell(signals))
 }
 
 func topSignalLabels(row FileEvidence, limit int) []string {
@@ -408,9 +409,9 @@ func writeDetailedSignalsMarkdown(b *strings.Builder, rows []FileEvidence) {
 	for i, row := range rows {
 		fmt.Fprintf(
 			b,
-			"| %d | `%s` | %.2f | %s | %s | %d | %d | %d | %s | %t | %s |\n",
+			"| %d | %s | %.2f | %s | %s | %d | %d | %d | %s | %t | %s |\n",
 			i+1,
-			row.Path,
+			markdownCodeCell(row.Path),
 			row.SeedScore,
 			cellOrDash(row.EvidenceClass),
 			cellOrDash(string(actionabilityForRow(row))),
@@ -585,9 +586,9 @@ func writeWhyTopMarkdown(b *strings.Builder, entries []WhyTopEntry) {
 		}
 		fmt.Fprintf(
 			b,
-			"| %d | `%s` | %s | %s | %s |\n",
+			"| %d | %s | %s | %s | %s |\n",
 			entry.Rank,
-			entry.Path,
+			markdownCodeCell(entry.Path),
 			escapeCell(why),
 			escapeCell(formatScoreBreakdown(entry.ScoreBreakdown)),
 			cellOrDash(entry.VerifyCmd),
@@ -664,8 +665,17 @@ type reportEnvelope struct {
 
 func escapeCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(s)
 	return s
+}
+
+func markdownCodeCell(s string) string {
+	if !strings.ContainsAny(s, "\\|`\r\n") {
+		return "`" + s + "`"
+	}
+	s = strings.NewReplacer("\\", `\\`, "\r", `\r`, "\n", `\n`).Replace(s)
+	s = strings.ReplaceAll(html.EscapeString(s), "|", "&#124;")
+	return "<code>" + s + "</code>"
 }
 
 func compactList(items []string, limit int) string {
@@ -721,8 +731,8 @@ func writeCullBucketMarkdown(b *strings.Builder, name string, bucket CullBucket)
 	for _, entry := range bucket.Examples {
 		fmt.Fprintf(
 			b,
-			"| `%s` | %d | %s | %s | %s | %s | %s |\n",
-			entry.Path,
+			"| %s | %d | %s | %s | %s | %s | %s |\n",
+			markdownCodeCell(entry.Path),
 			entry.Score,
 			cellOrDash(entry.Confidence),
 			cellOrDash(string(entry.Actionability)),

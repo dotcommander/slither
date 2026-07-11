@@ -1,6 +1,7 @@
 package slither
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -63,7 +64,7 @@ var reviewLanePriority = map[string]int{
 }
 
 func finalizeEvidenceMetadata(repo string, row *FileEvidence) {
-	row.ID = "slither:file:" + slug(row.Path)
+	row.ID = stableFileID(row.Path)
 	row.EvidenceClass = evidenceClassForRow(*row)
 	row.Confidence = confidenceForRow(*row)
 	row.Actionability = actionabilityForRow(*row)
@@ -72,6 +73,13 @@ func finalizeEvidenceMetadata(repo string, row *FileEvidence) {
 	if row.Excerpt != "" && int64(len(row.Excerpt)) < row.Bytes {
 		row.OmittedReason = "excerpt truncated to report summary"
 	}
+}
+
+// stableFileID preserves the complete path identity instead of collapsing
+// punctuation into a lossy slug. Raw URL-safe base64 is deterministic,
+// reversible, and collision-free for distinct path byte strings.
+func stableFileID(path string) string {
+	return "slither:file:" + base64.RawURLEncoding.EncodeToString([]byte(filepath.ToSlash(path)))
 }
 
 func BuildReviewPlan(rows []FileEvidence) ([]ReviewQueue, []ReviewLane) {
@@ -568,7 +576,7 @@ func verifyCmdForPathInRepo(repo, path string) string {
 	case strings.HasSuffix(rel, ".go"):
 		return goVerifyCmdForPath(repo, rel)
 	case isShellScriptPath(rel):
-		return "bash -n " + rel
+		return shellCommandWithPath("bash -n ", rel)
 	case isRepoConfigPath(rel) && verificationProfileForRepo(repo) == "go":
 		return goVerifyCmdForPath(repo, rel)
 	case strings.HasPrefix(rel, "docs/") || strings.EqualFold(filepath.Base(rel), "README.md"):
@@ -576,7 +584,7 @@ func verifyCmdForPathInRepo(repo, path string) string {
 	case strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/"):
 		return "go test ./..."
 	case strings.HasSuffix(strings.ToLower(rel), ".sql"):
-		return "psql \"$TEST_DATABASE_URL\" -v ON_ERROR_STOP=1 -f " + rel
+		return shellCommandWithPath("psql \"$TEST_DATABASE_URL\" -v ON_ERROR_STOP=1 -f ", rel)
 	case isJavaScriptSourcePath(rel):
 		return jsVerifyCmd(repo, rel)
 	case rel == "package.json" || rel == "package-lock.json":
@@ -601,7 +609,7 @@ func phpVerifyCmd(repo, rel string) string {
 		}
 	}
 	if strings.HasSuffix(strings.ToLower(rel), ".php") {
-		return "php -l " + rel
+		return shellCommandWithPath("php -l ", rel)
 	}
 	return ""
 }
@@ -611,7 +619,11 @@ func goVerifyCmdForPath(repo, rel string) string {
 	if dir == "." {
 		return "go test ./..."
 	}
-	return "go test ./" + dir + "/..."
+	arg := shellQuote("./" + dir + "/...")
+	if arg == "" {
+		return ""
+	}
+	return "go test " + arg
 }
 
 func nearestGoPackageDir(repo, rel string) string {
@@ -677,7 +689,7 @@ func jsVerifyCmd(repo, rel string) string {
 	if cmd := packageVerifyCmd(repo, rel); cmd != "" {
 		return cmd
 	}
-	return "bun build --no-bundle --outfile /tmp/slither-bun-check.js " + rel
+	return shellCommandWithPath("bun build --no-bundle --outfile /tmp/slither-bun-check.js ", rel)
 }
 
 func verificationProfileForRepo(repo string) string {
@@ -756,9 +768,49 @@ func packageVerifyCmd(repo, rel string) string {
 		return "npm run " + script
 	}
 	if packageUsesBun(filepath.Join(repo, pkgDir)) {
-		return "bun --cwd " + displayDir + " run " + script
+		dirArg, scriptArg := shellPathArg(displayDir), shellQuote(script)
+		if dirArg == "" || scriptArg == "" {
+			return ""
+		}
+		return "bun --cwd " + dirArg + " run " + scriptArg
 	}
-	return "npm --prefix " + displayDir + " run " + script
+	dirArg, scriptArg := shellPathArg(displayDir), shellQuote(script)
+	if dirArg == "" || scriptArg == "" {
+		return ""
+	}
+	return "npm --prefix " + dirArg + " run " + scriptArg
+}
+
+func shellCommandWithPath(prefix, value string) string {
+	arg := shellPathArg(value)
+	if arg == "" {
+		return ""
+	}
+	return prefix + arg
+}
+
+func shellPathArg(value string) string {
+	value = filepath.ToSlash(value)
+	if strings.HasPrefix(value, "-") {
+		value = "./" + value
+	}
+	return shellQuote(value)
+}
+
+// shellQuote returns a display command argument safe to paste into a POSIX
+// shell. Control-bearing arguments cannot be represented portably on one line,
+// so callers omit the candidate command rather than emit a lossy command.
+func shellQuote(value string) string {
+	if strings.ContainsAny(value, "\r\n") {
+		return ""
+	}
+	if value != "" && strings.IndexFunc(value, func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || strings.ContainsRune("_@%+=:,./-", r))
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func nearestPackageScripts(repo, rel string) (string, map[string]string) {

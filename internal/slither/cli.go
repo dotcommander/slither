@@ -95,9 +95,11 @@ func normalizeReportArgs(args []string) []string {
 	}
 	var flags []string
 	var positionals []string
+	hadSeparator := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
+			hadSeparator = true
 			positionals = append(positionals, args[i+1:]...)
 			break
 		}
@@ -114,6 +116,9 @@ func normalizeReportArgs(args []string) []string {
 			i++
 			flags = append(flags, args[i])
 		}
+	}
+	if hadSeparator {
+		flags = append(flags, "--")
 	}
 	return append(flags, positionals...)
 }
@@ -188,6 +193,15 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 		}
 		if !set["api-key-env"] {
 			opts.APIKeyEnv = cfg.Local.APIKeyEnv
+		}
+	}
+	if set["base-url"] && !set["api-key-env"] {
+		profileBaseURL := cfg.BaseURL
+		if opts.Local {
+			profileBaseURL = cfg.Local.BaseURL
+		}
+		if opts.BaseURL != profileBaseURL {
+			opts.APIKeyEnv = ""
 		}
 	}
 	return opts, nil
@@ -316,7 +330,7 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 		_, err = stdout.Write(output)
 		return err
 	}
-	if err := atomicWriteFile(opts.Out, output, 0o644); err != nil {
+	if err := atomicWriteFile(opts.Out, output, 0o600); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 	fmt.Fprintf(stdout, "slither wrote %s with %d report rows and %d ranked files\n", opts.Out, report.FilesScored, len(rankedMarkdownRows(report.Rows)))

@@ -2,6 +2,9 @@ package slither
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,10 @@ import (
 	"strings"
 	"time"
 )
+
+const maxGitHistoryBytes int64 = 16 << 20
+
+var errGitOutputLimit = errors.New("git output exceeded limit")
 
 type scoreContext struct {
 	files         []string
@@ -78,7 +85,10 @@ type staleMarkerInfo struct {
 }
 
 func churnByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
-	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--numstat", "--format=")
+	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--numstat", "--format=")
+	if err != nil {
+		return map[string]int{}, gitSkipReason(err)
+	}
 	if out == "" {
 		return map[string]int{}, "no recent git history"
 	}
@@ -122,7 +132,10 @@ func numstatPath(field string) string {
 }
 
 func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
-	history := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--pretty=format:%H")
+	history, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--pretty=format:%H")
+	if err != nil {
+		return map[string]int{}, gitSkipReason(err)
+	}
 	if history == "" {
 		return map[string]int{}, "no recent git history"
 	}
@@ -130,7 +143,10 @@ func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string
 	if len(commits) < 30 {
 		return map[string]int{}, "insufficient commit count:" + itoa(len(commits))
 	}
-	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
+	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
+	if err != nil {
+		return map[string]int{}, gitSkipReason(err)
+	}
 	if out == "" {
 		return map[string]int{}, ""
 	}
@@ -145,7 +161,10 @@ func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string
 }
 
 func ownershipByFile(ctx context.Context, repo string, days int) (map[string]ownershipInfo, string) {
-	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_AUTHOR__%ae", "--name-only")
+	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_AUTHOR__%ae", "--name-only")
+	if err != nil {
+		return map[string]ownershipInfo{}, gitSkipReason(err)
+	}
 	if out == "" {
 		return map[string]ownershipInfo{}, "no recent git history"
 	}
@@ -189,7 +208,10 @@ func ownershipByFile(ctx context.Context, repo string, days int) (map[string]own
 }
 
 func cochangeByFile(ctx context.Context, repo string, days int) (map[string]cochangeInfo, string) {
-	out := runGit(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_COMMIT__", "--name-only")
+	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_COMMIT__", "--name-only")
+	if err != nil {
+		return map[string]cochangeInfo{}, gitSkipReason(err)
+	}
 	if out == "" {
 		return map[string]cochangeInfo{}, "no recent git history"
 	}
@@ -307,9 +329,17 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	today := time.Now()
 	stale := map[string]staleMarkerInfo{}
 	blameFailures := 0
+	blameFailureReason := ""
 	for _, marker := range markers {
 		rel, line := marker[0], marker[1]
-		out := runGit(ctx, repo, "blame", "--line-porcelain", "-L", line+","+line, "--", rel)
+		out, err := runGitOutput(ctx, repo, "blame", "--line-porcelain", "-L", line+","+line, "--", rel)
+		if err != nil {
+			blameFailures++
+			if blameFailureReason == "" {
+				blameFailureReason = gitSkipReason(err)
+			}
+			continue
+		}
 		if out == "" {
 			blameFailures++
 			continue
@@ -335,8 +365,11 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 		}
 		stale[rel] = info
 	}
-	if blameFailures > 0 && len(stale) == 0 {
-		return map[string]staleMarkerInfo{}, "marker blame unavailable:" + itoa(blameFailures)
+	if blameFailures > 0 {
+		if blameFailureReason != "" {
+			return stale, "marker blame " + blameFailureReason + ":" + itoa(blameFailures)
+		}
+		return stale, "marker blame unavailable:" + itoa(blameFailures)
 	}
 	return stale, ""
 }
@@ -561,20 +594,63 @@ func isEnvContractDocPath(rel string) bool {
 }
 
 func runGit(ctx context.Context, repo string, args ...string) string {
+	out, _ := runGitOutput(ctx, repo, args...)
+	return out
+}
+
+func runGitOutput(ctx context.Context, repo string, args ...string) (string, error) {
+	return runGitOutputLimit(ctx, repo, maxGitHistoryBytes, args...)
+}
+
+func runGitOutputLimit(ctx context.Context, repo string, limit int64, args ...string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("git stdout: %w", err)
 	}
-	return string(out)
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start git: %w", err)
+	}
+	out, readErr := io.ReadAll(io.LimitReader(stdout, limit+1))
+	if readErr != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return "", fmt.Errorf("read git output: %w", readErr)
+	}
+	if int64(len(out)) > limit {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return "", fmt.Errorf("%w: %d bytes", errGitOutputLimit, limit)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", fmt.Errorf("git command: %w", err)
+	}
+	return string(out), nil
+}
+
+func gitSkipReason(err error) string {
+	switch {
+	case errors.Is(err, errGitOutputLimit):
+		return "output_limit_exceeded:" + itoa(int(maxGitHistoryBytes))
+	case errors.Is(err, context.Canceled):
+		return "command_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "command_deadline_exceeded"
+	default:
+		return "command_failed"
+	}
 }
 
 func relPath(repo, path string) (string, bool) {
 	rel, err := filepath.Rel(repo, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || isParentTraversal(rel) {
 		return "", false
 	}
 	return filepath.ToSlash(rel), true

@@ -15,11 +15,14 @@ const (
 // scoreTopRows scores rows in batches using a bounded worker pool, mutating each
 // row in place with model results. Batches cover disjoint index ranges, so the
 // concurrent writes never overlap and output order is preserved without a lock.
-// A failed batch degrades only its own files to deterministic + model_error
-// (handled inside ScoreBatch); it never aborts the scan.
-func scoreTopRows(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, batchSize, concurrency int) {
+// Provider-failed batches degrade only their own files to deterministic +
+// model_error (handled inside ScoreBatch); caller cancellation aborts the scan.
+func scoreTopRows(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, batchSize, concurrency int) error {
 	if scorer == nil || len(rows) == 0 {
-		return
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if batchSize < 1 {
 		batchSize = 1
@@ -28,13 +31,19 @@ func scoreTopRows(ctx context.Context, scorer *ModelScorer, rows []FileEvidence,
 		concurrency = 1
 	}
 	sem := make(chan struct{}, concurrency)
+	errCh := make(chan error, (len(rows)+batchSize-1)/batchSize)
 	var wg sync.WaitGroup
 	for start := 0; start < len(rows); start += batchSize {
 		end := start + batchSize
 		if end > len(rows) {
 			end = len(rows)
 		}
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return ctx.Err()
+		}
 		wg.Add(1)
 		// Exit condition: each goroutine scores exactly one batch, writes the
 		// results back into its disjoint slice range, releases its semaphore
@@ -42,9 +51,20 @@ func scoreTopRows(ctx context.Context, scorer *ModelScorer, rows []FileEvidence,
 		go func(batch []FileEvidence) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			scored, _ := scorer.ScoreBatch(ctx, batch)
+			scored, err := scorer.ScoreBatch(ctx, batch)
 			copy(batch, scored)
+			if err != nil {
+				errCh <- err
+			}
 		}(rows[start:end])
 	}
 	wg.Wait()
+	close(errCh)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for err := range errCh {
+		return err
+	}
+	return nil
 }

@@ -1,7 +1,6 @@
 package slither
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -86,6 +85,24 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if skipped > 0 {
 		report.SkippedSignals = append(report.SkippedSignals, "scan:unreadable_skipped:"+itoa(skipped))
 	}
+	truncated := 0
+	detectorErrors := 0
+	for _, row := range rows {
+		if stringSliceContains(row.Reasons, "scan:content_truncated") {
+			truncated++
+		}
+		for _, reason := range row.Reasons {
+			if strings.HasPrefix(reason, "detector_error:") {
+				detectorErrors++
+			}
+		}
+	}
+	if truncated > 0 {
+		report.SkippedSignals = append(report.SkippedSignals, "scan:content_truncated:"+itoa(truncated))
+	}
+	if detectorErrors > 0 {
+		report.SkippedSignals = append(report.SkippedSignals, "content_detectors:errors:"+itoa(detectorErrors))
+	}
 	// Pre-rank deterministically and only spend model calls on the top band:
 	// rows ranked well below --top keep their deterministic score, so the
 	// reported set is preserved without paying to score files that get
@@ -97,10 +114,15 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		// written back in place, preserving order. Rows beyond scoreLimit keep
 		// their deterministic score.
 		if opts.NoCache {
-			scoreTopRows(ctx, scorer, rows[:scoreLimit], modelBatchSize, modelScoreConcurrency)
+			if err := scoreTopRows(ctx, scorer, rows[:scoreLimit], modelBatchSize, modelScoreConcurrency); err != nil {
+				return Report{}, err
+			}
 		} else {
 			cache := loadScoreCache()
-			hits, misses := scoreTopRowsCached(ctx, scorer, rows[:scoreLimit], cache)
+			hits, misses, err := scoreTopRowsCached(ctx, scorer, rows[:scoreLimit], cache)
+			if err != nil {
+				return Report{}, err
+			}
 			if signal := scoreCachePersistSkippedSignal(cache); signal != "" {
 				report.SkippedSignals = append(report.SkippedSignals, signal)
 			}
@@ -165,7 +187,7 @@ func filterDiscoveredPaths(repo string, paths []string, include, exclude []strin
 
 func filterRelPath(repo, candidate string) string {
 	if repo != "" {
-		if rel, err := filepath.Rel(repo, candidate); err == nil && !strings.HasPrefix(rel, "..") {
+		if rel, err := filepath.Rel(repo, candidate); err == nil && !isParentTraversal(rel) {
 			return filepath.ToSlash(rel)
 		}
 	}
@@ -206,32 +228,64 @@ func pathPatternMatches(pattern, rel string) (bool, error) {
 }
 
 func doublestarPatternMatches(pattern, rel string) (bool, error) {
-	if pattern == "**" || pattern == "**/*" {
-		return true, nil
-	}
-	parts := strings.Split(pattern, "**")
-	if len(parts) != 2 {
-		return false, fmt.Errorf("at most one ** is supported in pattern %q", pattern)
-	}
-	prefix, suffix := parts[0], parts[1]
-	if prefix != "" && !strings.HasPrefix(rel, strings.TrimSuffix(prefix, "/")) {
-		return false, nil
-	}
-	if suffix == "" {
-		return true, nil
-	}
-	suffix = strings.TrimPrefix(suffix, "/")
-	if suffix == "" {
-		return true, nil
-	}
-	if strings.ContainsAny(suffix, "*?[") {
-		ok, err := path.Match(suffix, path.Base(rel))
-		if err != nil {
-			return false, err
+	pattern = strings.TrimPrefix(filepath.ToSlash(pattern), "./")
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "./")
+	patternParts := strings.Split(pattern, "/")
+	relParts := strings.Split(rel, "/")
+	for _, part := range patternParts {
+		if part == "**" {
+			continue
 		}
-		return ok || strings.HasSuffix(rel, strings.TrimPrefix(suffix, "*")), nil
+		if _, err := path.Match(part, ""); err != nil {
+			return false, fmt.Errorf("invalid path pattern %q: %w", pattern, err)
+		}
 	}
-	return strings.HasSuffix(rel, suffix) || strings.Contains(rel, suffix), nil
+
+	type matchState struct{ pattern, path int }
+	memo := map[matchState]bool{}
+	seen := map[matchState]bool{}
+	var matches func(int, int) (bool, error)
+	matches = func(patternIndex, pathIndex int) (bool, error) {
+		state := matchState{pattern: patternIndex, path: pathIndex}
+		if seen[state] {
+			return memo[state], nil
+		}
+		seen[state] = true
+		if patternIndex == len(patternParts) {
+			memo[state] = pathIndex == len(relParts)
+			return memo[state], nil
+		}
+		if patternParts[patternIndex] == "**" {
+			for patternIndex+1 < len(patternParts) && patternParts[patternIndex+1] == "**" {
+				patternIndex++
+			}
+			for nextPath := pathIndex; nextPath <= len(relParts); nextPath++ {
+				ok, err := matches(patternIndex+1, nextPath)
+				if err != nil {
+					return false, err
+				}
+				if ok {
+					memo[state] = true
+					return true, nil
+				}
+			}
+			return false, nil
+		}
+		if pathIndex == len(relParts) {
+			return false, nil
+		}
+		ok, err := path.Match(patternParts[patternIndex], relParts[pathIndex])
+		if err != nil {
+			return false, fmt.Errorf("invalid path pattern %q: %w", pattern, err)
+		}
+		if !ok {
+			return false, nil
+		}
+		result, err := matches(patternIndex+1, pathIndex+1)
+		memo[state] = result
+		return result, err
+	}
+	return matches(0, 0)
 }
 
 func compileFocus(focus string) (*regexp.Regexp, error) {
@@ -537,19 +591,19 @@ func discoverFiles(ctx context.Context, repo string) ([]string, DiscoveryStats, 
 }
 
 func gitFiles(ctx context.Context, repo string, args ...string) ([]string, error) {
-	cmdArgs := append([]string{"-C", repo, "ls-files"}, args...)
+	cmdArgs := append([]string{"-C", repo, "ls-files", "-z"}, args...)
 	out, err := exec.CommandContext(ctx, "git", cmdArgs...).Output()
 	if err != nil {
 		return nil, err
 	}
-	var paths []string
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		if rel := strings.TrimSpace(scanner.Text()); rel != "" {
+	parts := strings.Split(string(out), "\x00")
+	paths := make([]string, 0, len(parts)-1)
+	for _, rel := range parts {
+		if rel != "" {
 			paths = append(paths, rel)
 		}
 	}
-	return paths, scanner.Err()
+	return paths, nil
 }
 
 func appendGitFiles(repo string, groups ...[]string) ([]string, int, int) {
@@ -585,7 +639,7 @@ func appendGitFiles(repo string, groups ...[]string) ([]string, int, int) {
 
 func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (FileEvidence, bool, error) {
 	rel, err := filepath.Rel(repo, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || isParentTraversal(rel) {
 		return FileEvidence{}, false, nil
 	}
 	if shouldSkip(rel) {
@@ -604,7 +658,7 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	if !info.Mode().IsRegular() {
 		return FileEvidence{}, false, nil
 	}
-	text, ok, err := readTextPrefix(path, maxBytes)
+	text, ok, truncated, err := readTextPrefixWithStatus(path, maxBytes)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return FileEvidence{}, false, errFileUnreadable
@@ -616,12 +670,20 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	}
 	e := FileEvidence{Path: filepath.ToSlash(rel), Bytes: info.Size(), Lines: strings.Count(text, "\n") + 1, Excerpt: firstSentence(text)}
 	scoreFile(repo, text, &e, scoreCtx)
+	if truncated {
+		e.Reasons = append(e.Reasons, "scan:content_truncated")
+	}
 	e.EvidenceLayers = evidenceLayersForReasons(e.Reasons)
 	if stringSliceContains(e.EvidenceLayers, "secret-risk") {
 		e.Excerpt = "[redacted: secret-risk evidence]"
 	}
 	e.Summary = e.Excerpt
 	return e, true, nil
+}
+
+func isParentTraversal(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	return rel == ".." || strings.HasPrefix(rel, "../")
 }
 
 func shouldSkip(rel string) bool {
@@ -641,19 +703,67 @@ func shouldSkip(rel string) bool {
 }
 
 func readTextPrefix(path string, maxBytes int64) (string, bool, error) {
+	text, ok, _, err := readTextPrefixWithStatus(path, maxBytes)
+	return text, ok, err
+}
+
+func readTextPrefixWithStatus(path string, maxBytes int64) (string, bool, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", false, fmt.Errorf("open %s: %w", path, err)
+		return "", false, false, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes))
+	readLimit := maxBytes
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if maxBytes <= maxInt64-utf8.UTFMax {
+		readLimit += utf8.UTFMax
+	}
+	data, err := io.ReadAll(io.LimitReader(f, readLimit))
 	if err != nil {
-		return "", false, fmt.Errorf("read %s: %w", path, err)
+		return "", false, false, fmt.Errorf("read %s: %w", path, err)
 	}
-	if len(data) == 0 || strings.Contains(string(data[:min(len(data), 4096)]), "\x00") || !utf8.Valid(data) {
-		return "", false, nil
+	if len(data) == 0 || strings.Contains(string(data[:min(len(data), 4096)]), "\x00") {
+		return "", false, false, nil
 	}
-	return string(data), true, nil
+	truncated := int64(len(data)) > maxBytes
+	if !truncated {
+		if !utf8.Valid(data) {
+			return "", false, false, nil
+		}
+		return string(data), true, false, nil
+	}
+	bounded := data[:maxBytes]
+	if utf8.Valid(bounded) {
+		return string(bounded), true, true, nil
+	}
+	prefix, valid := trimIncompleteUTF8(bounded)
+	if !valid {
+		return "", false, false, nil
+	}
+	// The bounded prefix ends inside a rune. Validate only that crossing rune;
+	// unrelated bytes after the inspection limit do not own prefix validity.
+	crossing := data[len(prefix):]
+	if !utf8.FullRune(crossing) {
+		return "", false, false, nil
+	}
+	if r, size := utf8.DecodeRune(crossing); r == utf8.RuneError && size == 1 {
+		return "", false, false, nil
+	}
+	return string(prefix), true, true, nil
+}
+
+func trimIncompleteUTF8(data []byte) ([]byte, bool) {
+	for offset := 0; offset < len(data); {
+		_, size := utf8.DecodeRune(data[offset:])
+		if size == 1 && data[offset] >= utf8.RuneSelf {
+			if !utf8.FullRune(data[offset:]) {
+				return data[:offset], true
+			}
+			return nil, false
+		}
+		offset += size
+	}
+	return data, true
 }
 
 func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
@@ -726,6 +836,7 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	if e.FixTouches > 0 {
 		e.Reasons = append(e.Reasons, "bugfix_touches:"+itoa(e.FixTouches))
 	}
+	redactSecretRiskEvidenceLocations(e)
 	e.EvidenceLayers = evidenceLayersForReasons(e.Reasons)
 	e.SeedScore = seedScore(*e)
 	e.Score = qualitativeScore(*e)
@@ -759,6 +870,8 @@ func evidenceLayersForReasons(reasons []string) []string {
 		switch {
 		case strings.HasPrefix(reason, "path:"):
 			layers = appendLayer(layers, "path-risk")
+		case strings.HasPrefix(reason, "detector_error:"):
+			layers = appendLayer(layers, "detector-error")
 		case strings.HasPrefix(reason, "content:hardcoded_private_key") ||
 			strings.HasPrefix(reason, "content:provider_token_literal") ||
 			strings.HasPrefix(reason, "content:credential_assignment_literal"):

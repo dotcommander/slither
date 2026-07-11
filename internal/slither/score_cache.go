@@ -23,12 +23,16 @@ const maxCacheEntries = 5000
 // instead of letting startup memory scale with a stale artifact.
 const maxScoreCacheBytes = 8 << 20
 
+// scoreCacheContractVersion invalidates results whose persisted shape predates
+// the separation of deterministic and model-owned reasons.
+const scoreCacheContractVersion = "model-reasons-v2"
+
 // cachedScore is the persisted model result for one file. Only genuine model
 // scores are stored — degraded (model_error) rows are never cached.
 type cachedScore struct {
-	Score   int      `json:"score"`
-	Summary string   `json:"summary"`
-	Reasons []string `json:"reasons"`
+	Score        int      `json:"score"`
+	Summary      string   `json:"summary"`
+	ModelReasons []string `json:"model_reasons,omitempty"`
 }
 
 // scoreCache is a read-through, content-hash result cache persisted as a single
@@ -158,7 +162,7 @@ func (c *scoreCache) persist() error {
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(c.path, append(data, '\n'), 0o644)
+	return atomicWriteFile(c.path, append(data, '\n'), 0o600)
 }
 
 func scoreCachePersistSkippedSignal(cache *scoreCache) string {
@@ -183,6 +187,8 @@ func scoreCacheKey(model, baseURL string, fallbackModels []string, e FileEvidenc
 func scoreCacheKeyWithPromptContract(model, baseURL string, fallbackModels []string, promptContract string, e FileEvidence) string {
 	payload, _ := json.Marshal(projectEvidence(0, e))
 	h := sha256.New()
+	h.Write([]byte(scoreCacheContractVersion))
+	h.Write([]byte{0})
 	h.Write([]byte(promptContract))
 	h.Write([]byte{0})
 	h.Write([]byte(model))
@@ -206,9 +212,7 @@ func applyCachedScore(e *FileEvidence, cs cachedScore) {
 	if cs.Summary != "" {
 		e.Summary = cs.Summary
 	}
-	if len(cs.Reasons) > 0 {
-		e.Reasons = cs.Reasons
-	}
+	e.Reasons = appendModelReasons(e.Reasons, cs.ModelReasons)
 	e.EvidenceLayers = mergeLayers(fallbackLayers, []string{"model"})
 }
 
@@ -226,9 +230,12 @@ func cacheableResult(e FileEvidence) bool {
 // goroutines in scoreTopRows never touch the cache, so no map is shared across
 // goroutines. Keys are derived from the deterministic state before scoring, so a
 // future run reproduces the same key. Misses keep their original positions.
-func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, cache *scoreCache) (hits, misses int) {
+func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, cache *scoreCache) (hits, misses int, err error) {
 	if scorer == nil || cache == nil || len(rows) == 0 {
-		return 0, 0
+		return 0, 0, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
 	}
 	keys := make([]string, len(rows))
 	var missIdx []int
@@ -245,14 +252,27 @@ func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvi
 	}
 	misses = len(missRows)
 	if len(missRows) == 0 {
-		return hits, misses
+		return hits, misses, ctx.Err()
 	}
-	scoreTopRows(ctx, scorer, missRows, modelBatchSize, modelScoreConcurrency)
+	if err := scoreTopRows(ctx, scorer, missRows, modelBatchSize, modelScoreConcurrency); err != nil {
+		return hits, misses, err
+	}
 	for j, idx := range missIdx {
+		baselineReasonCount := len(rows[idx].Reasons)
 		rows[idx] = missRows[j]
 		if cacheableResult(missRows[j]) {
-			cache.put(keys[idx], cachedScore{Score: missRows[j].Score, Summary: missRows[j].Summary, Reasons: missRows[j].Reasons})
+			cache.put(keys[idx], cachedScore{Score: missRows[j].Score, Summary: missRows[j].Summary, ModelReasons: modelReasons(missRows[j].Reasons[baselineReasonCount:])})
 		}
 	}
-	return hits, misses
+	return hits, misses, nil
+}
+
+func modelReasons(reasons []string) []string {
+	var out []string
+	for _, reason := range reasons {
+		if strings.HasPrefix(reason, "model:") {
+			out = append(out, strings.TrimPrefix(reason, "model:"))
+		}
+	}
+	return out
 }

@@ -98,6 +98,10 @@ func writeConfig(path string, cfg Config) error {
 
 func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	dir := filepath.Dir(path)
+	if info, err := os.Stat(path); err == nil {
+		// Replacing a private artifact must never broaden its permissions.
+		perm &= info.Mode().Perm()
+	}
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
