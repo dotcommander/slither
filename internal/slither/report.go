@@ -14,10 +14,10 @@ const maxDetailedMarkdownRows = 80
 func RenderMarkdown(report Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Slither Report\n\n")
-	fmt.Fprintf(&b, "> Slither creeps like a snake through `%s`, tasting each path for cheap-model scent before striking only where the signal is strongest.\n\n", report.Repo)
+	fmt.Fprintf(&b, "> Slither creeps like a snake through %s, tasting each path for cheap-model scent before striking only where the signal is strongest.\n\n", markdownCodeCell(report.Repo))
 	fmt.Fprintf(&b, "- Generated: `%s`\n", report.GeneratedAt.Format("2006-01-02 15:04:05 MST"))
 	fmt.Fprintf(&b, "- Days: `%d`\n", report.Days)
-	fmt.Fprintf(&b, "- Patterns source: `%s`\n", report.PatternsSource)
+	fmt.Fprintf(&b, "- Patterns source: %s\n", markdownCodeCell(report.PatternsSource))
 	fmt.Fprintf(&b, "- Files seen: `%d`\n", report.FilesSeen)
 	if report.Build.Version != "" || report.Build.Revision != "" || report.Build.GoVersion != "" {
 		fmt.Fprintf(&b, "- Slither build: `%s`\n", report.Build.Summary())
@@ -613,6 +613,7 @@ func RenderJSON(report Report) ([]byte, error) {
 	if report.CullLedger != nil {
 		rows = rowsWithCullDispositions(rows)
 	}
+	rows = scrubJSONRows(rows)
 	payload := reportEnvelope{
 		RunLabel:       "slither_report",
 		Repo:           report.Repo,

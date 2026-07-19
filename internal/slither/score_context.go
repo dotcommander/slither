@@ -435,8 +435,8 @@ func localImportCounts(repo string, files []string, maxBytes int64) map[string]i
 }
 
 func goModulePath(repo string) string {
-	data, err := os.ReadFile(filepath.Join(repo, "go.mod"))
-	if err != nil {
+	data, ok := readRepoManifest(repo, "go.mod")
+	if !ok {
 		return ""
 	}
 	for _, line := range strings.Split(string(data), "\n") {

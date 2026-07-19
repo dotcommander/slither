@@ -714,11 +714,8 @@ func repoFileExists(repo, rel string) bool {
 }
 
 func composerHasScript(repo, name string) bool {
-	if repo == "" {
-		return false
-	}
-	data, err := os.ReadFile(filepath.Join(repo, "composer.json"))
-	if err != nil {
+	data, ok := readRepoManifest(repo, "composer.json")
+	if !ok {
 		return false
 	}
 	var composer struct {
@@ -727,16 +724,13 @@ func composerHasScript(repo, name string) bool {
 	if err := json.Unmarshal(data, &composer); err != nil {
 		return false
 	}
-	_, ok := composer.Scripts[name]
-	return ok
+	_, exists := composer.Scripts[name]
+	return exists
 }
 
 func packageHasScript(repo, name string) bool {
-	if repo == "" {
-		return false
-	}
-	data, err := os.ReadFile(filepath.Join(repo, "package.json"))
-	if err != nil {
+	data, ok := readRepoManifest(repo, "package.json")
+	if !ok {
 		return false
 	}
 	var pkg struct {
@@ -819,9 +813,9 @@ func nearestPackageScripts(repo, rel string) (string, map[string]string) {
 		dir = ""
 	}
 	for {
-		pkgPath := filepath.Join(repo, filepath.FromSlash(dir), "package.json")
-		data, err := os.ReadFile(pkgPath)
-		if err == nil {
+		manifestPath := filepath.ToSlash(filepath.Join(dir, "package.json"))
+		data, ok := readRepoManifest(repo, manifestPath)
+		if ok {
 			var pkg struct {
 				Scripts map[string]string `json:"scripts"`
 			}

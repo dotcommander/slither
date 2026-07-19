@@ -1,6 +1,7 @@
 package slither
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,6 +72,88 @@ func TestRenderMarkdownEscapesPathAndCommandTableSyntax(t *testing.T) {
 	}
 	if strings.Contains(md, "go test './bad|name/...' |") {
 		t.Fatalf("raw command pipe broke Markdown table:\n%s", md)
+	}
+}
+
+func TestRenderMarkdownEscapesHeaderCodeValues(t *testing.T) {
+	t.Parallel()
+	report := Report{
+		Repo:           "repo`name\nnext",
+		PatternsSource: "patterns`custom\r.json",
+	}
+	md := RenderMarkdown(report)
+
+	wantRepo := "> Slither creeps like a snake through " + markdownCodeCell(report.Repo) + ","
+	if !strings.Contains(md, wantRepo) {
+		t.Fatalf("escaped repository header missing: want %q in:\n%s", wantRepo, md)
+	}
+	wantPatterns := "- Patterns source: " + markdownCodeCell(report.PatternsSource) + "\n"
+	if !strings.Contains(md, wantPatterns) {
+		t.Fatalf("escaped patterns header missing: want %q in:\n%s", wantPatterns, md)
+	}
+	if strings.Contains(md, "`"+markdownCodeCell(report.Repo)+"`") || strings.Contains(md, "`"+markdownCodeCell(report.PatternsSource)+"`") {
+		t.Fatalf("header code values received extra backticks:\n%s", md)
+	}
+}
+
+func TestRenderJSONScrubsSecretsWithoutMutatingReport(t *testing.T) {
+	t.Parallel()
+	report := Report{
+		Repo:       "/repo",
+		CullLedger: &CullLedger{},
+		Rows: []FileEvidence{{
+			Path:    "config.go",
+			Summary: "Authorization: Custom opaqueTokenValue123 while prose remains",
+			Excerpt: `Bearer bearerTokenValue123" and Bearer abcdefghijklmnop" and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.signaturePart`,
+			EvidenceLocations: []EvidenceLocation{
+				{Reason: "content:config", Line: 1, Snippet: `api_key="customCredential987654" remains structured`},
+				{Reason: "content:webhook", Line: 2, Snippet: "signature whsig_privateValue123"},
+				{Reason: "content:authorization", Line: 3, Snippet: "Authorization: Basic dXNlcjpwYXNz"},
+			},
+		}},
+	}
+
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload reportEnvelope
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(payload.Rows))
+	}
+	got := payload.Rows[0]
+	for _, secret := range []string{"opaqueTokenValue123", "bearerTokenValue123", "abcdefghijklmnop", "eyJhbGciOiJIUzI1NiJ9", "customCredential987654", "whsig_privateValue123", "dXNlcjpwYXNz"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("secret %q survived JSON scrubbing: %s", secret, data)
+		}
+	}
+	if !strings.Contains(got.Summary, "while prose remains") || !strings.Contains(got.EvidenceLocations[0].Snippet, "remains structured") {
+		t.Fatalf("non-secret prose was not preserved: %#v", got)
+	}
+	if got.CullDecision == "" {
+		t.Fatalf("cull disposition missing after redaction: %#v", got)
+	}
+	if report.Rows[0].Summary != "Authorization: Custom opaqueTokenValue123 while prose remains" ||
+		report.Rows[0].Excerpt != `Bearer bearerTokenValue123" and Bearer abcdefghijklmnop" and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.signaturePart` ||
+		report.Rows[0].EvidenceLocations[0].Snippet != `api_key="customCredential987654" remains structured` ||
+		report.Rows[0].CullDecision != "" {
+		t.Fatalf("RenderJSON mutated its input report: %#v", report.Rows[0])
+	}
+}
+
+func TestScrubOutputSecretsPreservesNonSecretProse(t *testing.T) {
+	t.Parallel()
+	for _, want := range []string{
+		"Bearer authentication uses a token supplied by the caller.",
+		"Load example.test.localhost before authentication.",
+		"The whsig_header field names the webhook signature header.",
+	} {
+		if got := scrubOutputSecrets(want); got != want {
+			t.Fatalf("non-secret prose = %q, want %q", got, want)
+		}
 	}
 }
 
