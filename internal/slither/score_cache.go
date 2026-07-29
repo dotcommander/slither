@@ -25,7 +25,7 @@ const maxScoreCacheBytes = 8 << 20
 
 // scoreCacheContractVersion invalidates results whose persisted shape predates
 // the separation of deterministic and model-owned reasons.
-const scoreCacheContractVersion = "model-reasons-v2"
+const scoreCacheContractVersion = "content-id-model-reasons-v3"
 
 // cachedScore is the persisted model result for one file. Only genuine model
 // scores are stored — degraded (model_error) rows are never cached.
@@ -197,6 +197,8 @@ func scoreCacheKeyWithPromptContract(model, baseURL string, fallbackModels []str
 	h.Write([]byte{0})
 	h.Write([]byte(strings.Join(fallbackModels, "\x00")))
 	h.Write([]byte{0})
+	h.Write([]byte(e.ContentID))
+	h.Write([]byte{0})
 	h.Write(payload)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -205,15 +207,9 @@ func scoreCacheKeyWithPromptContract(model, baseURL string, fallbackModels []str
 // model result — including the "model" evidence layer and NO extra layer — so a
 // warm-cache run produces byte-identical output to a cold run.
 func applyCachedScore(e *FileEvidence, cs cachedScore) {
-	fallbackLayers := e.EvidenceLayers
-	if cs.Score >= 1 && cs.Score <= 5 {
-		e.Score = cs.Score
+	if !applyModelScore(e, cs.Score, cs.Summary, cs.ModelReasons) {
+		degradeEvidence(e, "model_error:invalid cached model score for "+e.Path)
 	}
-	if cs.Summary != "" {
-		e.Summary = cs.Summary
-	}
-	e.Reasons = appendModelReasons(e.Reasons, cs.ModelReasons)
-	e.EvidenceLayers = mergeLayers(fallbackLayers, []string{"model"})
 }
 
 // cacheableResult reports whether a scored row is a genuine model result (and

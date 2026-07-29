@@ -326,7 +326,7 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	if len(markers) == 0 {
 		return map[string]staleMarkerInfo{}, ""
 	}
-	today := time.Now()
+	today := currentTime()
 	stale := map[string]staleMarkerInfo{}
 	blameFailures := 0
 	blameFailureReason := ""
@@ -435,11 +435,11 @@ func localImportCounts(repo string, files []string, maxBytes int64) map[string]i
 }
 
 func goModulePath(repo string) string {
-	data, ok := readRepoManifest(repo, "go.mod")
-	if !ok {
+	text, ok, truncated, err := sourcePrefixReader(filepath.Join(repo, "go.mod"), maxRepoManifestBytes)
+	if err != nil || !ok || truncated {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == "module" {
 			return strings.Trim(fields[1], `"`)

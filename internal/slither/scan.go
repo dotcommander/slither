@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 )
 
@@ -81,7 +80,7 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if opts.Model != "" {
 		baseURL = opts.BaseURL
 	}
-	report := Report{Repo: opts.Repo, GeneratedAt: time.Now(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals, Filters: ReportFilters{Focus: opts.Focus, Include: opts.Include, Exclude: opts.Exclude, Inventory: opts.Inventory}}
+	report := Report{SchemaVersion: reportSchemaVersion, Repo: opts.Repo, GeneratedAt: currentTime(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals, Filters: ReportFilters{Focus: opts.Focus, Include: opts.Include, Exclude: opts.Exclude, Inventory: opts.Inventory}, Parameters: normalizedReportParameters(opts, patterns.ID)}
 	if skipped > 0 {
 		report.SkippedSignals = append(report.SkippedSignals, "scan:unreadable_skipped:"+itoa(skipped))
 	}
@@ -132,6 +131,8 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	for i := range rows {
 		evidence := rows[i]
 		finalizeEvidenceMetadata(opts.Repo, &evidence)
+		evidence.EvidenceID = evidenceIdentity(opts.Repo, evidence)
+		rows[i] = evidence
 		if !rowMatchesFocus(evidence, focusRE) || !rowMatchesInventory(evidence, opts.Inventory) {
 			continue
 		}
@@ -146,6 +147,13 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		report.FirstReadQueue, report.ReviewPlan = BuildReviewPlanForRepo(opts.Repo, report.Rows)
 	}
 	report.WhyTop = buildWhyTopEntries(report.Rows, opts.WhyTop)
+	state, signals, err := sourceStateForReport(ctx, opts.Repo, discovery, rows, report.SkippedSignals)
+	if err != nil {
+		return Report{}, err
+	}
+	report.SourceState = state
+	report.SkippedSignals = signals
+	report.ReportID = reportIdentity(report)
 	return report, nil
 }
 
@@ -658,7 +666,7 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	if !info.Mode().IsRegular() {
 		return FileEvidence{}, false, nil
 	}
-	text, ok, truncated, err := readTextPrefixWithStatus(path, maxBytes)
+	text, ok, truncated, err := sourcePrefixReader(path, maxBytes)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return FileEvidence{}, false, errFileUnreadable
@@ -674,6 +682,8 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 		e.Reasons = append(e.Reasons, "scan:content_truncated")
 	}
 	e.EvidenceLayers = evidenceLayersForReasons(e.Reasons)
+	e.ContentID = contentIdentity([]byte(text), info.Size(), truncated)
+	setDeterministicProvenance(&e)
 	if stringSliceContains(e.EvidenceLayers, "secret-risk") {
 		e.Excerpt = "[redacted: secret-risk evidence]"
 	}
@@ -703,7 +713,7 @@ func shouldSkip(rel string) bool {
 }
 
 func readTextPrefix(path string, maxBytes int64) (string, bool, error) {
-	text, ok, _, err := readTextPrefixWithStatus(path, maxBytes)
+	text, ok, _, err := sourcePrefixReader(path, maxBytes)
 	return text, ok, err
 }
 

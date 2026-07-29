@@ -1,0 +1,1 @@
+{"schema":"slither.context/v1","report_id":"sha256:report-example","budget_bytes":1024,"used_bytes":235,"targets":[{"id":"file:auth.go","resolution":"lexical","text":"[redacted: secret-risk evidence]"}],"omissions":["neighbor:budget"]}

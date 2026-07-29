@@ -1,0 +1,2 @@
+{"schema":"slither.agent/v1","id":"hello-1","ok":true,"result":{"protocol":"slither.agent/v1","schemas":["slither.report/v1","slither.context/v1"]}}
+{"schema":"slither.agent/v1","id":"context-1","ok":true,"result":{"schema":"slither.context/v1","budget_bytes":512,"used_bytes":256,"targets":[]}}

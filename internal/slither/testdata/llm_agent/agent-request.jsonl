@@ -1,0 +1,2 @@
+{"schema":"slither.agent/v1","id":"hello-1","op":"hello"}
+{"schema":"slither.agent/v1","id":"context-1","op":"context","target_ids":["file:auth.go"],"budget_bytes":512}

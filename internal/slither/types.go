@@ -26,6 +26,9 @@ type Options struct {
 
 type FileEvidence struct {
 	ID                     string             `json:"id,omitempty"`
+	ContentID              string             `json:"content_id,omitempty"`
+	EvidenceID             string             `json:"evidence_id,omitempty"`
+	ScoreProvenance        ScoreProvenance    `json:"score_provenance,omitzero"`
 	Path                   string             `json:"path"`
 	EvidenceClass          string             `json:"evidence_class,omitempty"`
 	Confidence             string             `json:"confidence,omitempty"`
@@ -72,6 +75,18 @@ type FileEvidence struct {
 	CullReason             string             `json:"cull_reason,omitempty"`
 	Summary                string             `json:"summary"`
 	Excerpt                string             `json:"excerpt,omitempty"`
+}
+
+// ScoreProvenance records the deterministic baseline and, when accepted, the
+// model score that selected the compatibility Score field.
+type ScoreProvenance struct {
+	Deterministic int    `json:"deterministic"`
+	Model         *int   `json:"model,omitempty"`
+	SelectedBy    string `json:"selected_by"`
+}
+
+func (p ScoreProvenance) IsZero() bool {
+	return p.Deterministic == 0 && p.Model == nil && p.SelectedBy == ""
 }
 
 // Actionability is the deterministic next-action class for a row. It tells a
@@ -123,6 +138,10 @@ type DiscoveryStats struct {
 }
 
 type Report struct {
+	SchemaVersion  string
+	ReportID       string
+	SourceState    SourceState
+	Parameters     ReportParameters
 	Repo           string
 	GeneratedAt    time.Time
 	Days           int
@@ -142,6 +161,31 @@ type Report struct {
 	FreshnessHint  string
 	CullLedger     *CullLedger
 	CacheStats     *CacheStats
+}
+
+type SourceState struct {
+	Kind       string `json:"kind"`
+	Head       string `json:"head"`
+	Dirty      bool   `json:"dirty"`
+	TreeDigest string `json:"tree_digest"`
+}
+
+// ReportParameters contains only normalized inputs that can change evidence or
+// scoring behavior. Paths, output mode, credentials, and presentation flags
+// deliberately do not participate in report identity.
+type ReportParameters struct {
+	Days            int      `json:"days"`
+	MaxBytes        int64    `json:"max_bytes"`
+	Top             int      `json:"top"`
+	Focus           string   `json:"focus,omitempty"`
+	Include         []string `json:"include,omitempty"`
+	Exclude         []string `json:"exclude,omitempty"`
+	Inventory       string   `json:"inventory,omitempty"`
+	PatternsID      string   `json:"patterns_id"`
+	Model           string   `json:"model,omitempty"`
+	BaseURL         string   `json:"base_url,omitempty"`
+	FallbackModels  []string `json:"fallback_models,omitempty"`
+	ModelContractID string   `json:"model_contract_id,omitempty"`
 }
 
 type ReportFilters struct {

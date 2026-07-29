@@ -1,0 +1,16 @@
+{
+  "schema_version": "slither.report/v1",
+  "report_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "source_state": {"kind": "git", "head": "abc123", "dirty": false, "tree_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+  "parameters": {
+    "days": 90,
+    "max_bytes": 500000,
+    "top": 80,
+    "patterns_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "model": "example-model",
+    "base_url": "https://example.test/v1",
+    "fallback_models": ["fallback-a", "fallback-b"],
+    "model_contract_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "rows": [{"id": "slither:file:YXV0aC5nbw", "content_id": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "evidence_id": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "score": 4, "score_provenance": {"deterministic": 3, "model": 4, "selected_by": "model"}}]
+}

@@ -609,12 +609,35 @@ func formatScoreBreakdown(components []WhyTopScoreComponent) string {
 }
 
 func RenderJSON(report Report) ([]byte, error) {
-	rows := report.Rows
-	if report.CullLedger != nil {
-		rows = rowsWithCullDispositions(rows)
+	legacy := legacyReportJSONProjection(report)
+	payload := reportEnvelopeV1{
+		reportEnvelope: legacy,
+		Rows:           reportJSONRows(report),
+		SchemaVersion:  report.SchemaVersion,
+		ReportID:       report.ReportID,
+		SourceState:    report.SourceState,
+		Parameters:     report.Parameters,
 	}
-	rows = scrubJSONRows(rows)
-	payload := reportEnvelope{
+	if payload.SchemaVersion == "" {
+		payload.SchemaVersion = reportSchemaVersion
+	}
+	return json.MarshalIndent(payload, "", "  ")
+}
+
+// renderLegacyJSON preserves the pre-v1 JSON envelope for compatibility tests
+// and downstream consumers that intentionally project away additive v1 fields.
+func renderLegacyJSON(report Report) ([]byte, error) {
+	return json.MarshalIndent(legacyReportJSONProjection(report), "", "  ")
+}
+
+func legacyReportJSONProjection(report Report) reportEnvelope {
+	rows := reportJSONRows(report)
+	for i := range rows {
+		rows[i].ContentID = ""
+		rows[i].EvidenceID = ""
+		rows[i].ScoreProvenance = ScoreProvenance{}
+	}
+	return reportEnvelope{
 		RunLabel:       "slither_report",
 		Repo:           report.Repo,
 		GeneratedAt:    report.GeneratedAt,
@@ -637,7 +660,14 @@ func RenderJSON(report Report) ([]byte, error) {
 		CullLedger:     report.CullLedger,
 		CacheStats:     report.CacheStats,
 	}
-	return json.MarshalIndent(payload, "", "  ")
+}
+
+func reportJSONRows(report Report) []FileEvidence {
+	rows := report.Rows
+	if report.CullLedger != nil {
+		rows = rowsWithCullDispositions(rows)
+	}
+	return scrubJSONRows(rows)
 }
 
 type reportEnvelope struct {
@@ -662,6 +692,15 @@ type reportEnvelope struct {
 	ReviewPlan     []ReviewLane   `json:"review_plan,omitempty"`
 	CullLedger     *CullLedger    `json:"cull_ledger,omitempty"`
 	CacheStats     *CacheStats    `json:"cache_stats,omitempty"`
+}
+
+type reportEnvelopeV1 struct {
+	reportEnvelope
+	Rows          []FileEvidence   `json:"rows"`
+	SchemaVersion string           `json:"schema_version"`
+	ReportID      string           `json:"report_id"`
+	SourceState   SourceState      `json:"source_state"`
+	Parameters    ReportParameters `json:"parameters"`
 }
 
 func escapeCell(s string) string {

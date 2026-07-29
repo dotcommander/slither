@@ -1,0 +1,2 @@
+{"schema":"slither.outcome/v1","timestamp":"2024-01-02T03:04:05Z","report_id":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence_id":"sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","lane":"kept_for_premium","rank":1,"score":4,"verdict":"refuted","files_opened":1,"tool_calls":1,"review_ms":50}
+{"schema":"slither.outcome/v1"

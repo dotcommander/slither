@@ -1,0 +1,68 @@
+{
+  "run_label": "slither_report",
+  "repo": "/repo",
+  "generated_at": "2024-01-02T03:04:05Z",
+  "days": 90,
+  "patterns_source": "embedded:triage_patterns.json",
+  "build": {},
+  "files_seen": 1,
+  "files_reported": 1,
+  "row_count": 1,
+  "discovery": {
+    "source": "filesystem",
+    "git_tracked": 0,
+    "git_untracked": 0,
+    "filesystem_files": 1,
+    "candidate_files": 1
+  },
+  "skipped_signals": [
+    "model_scoring:not_configured"
+  ],
+  "filters": {},
+  "rows": [
+    {
+      "path": "auth.go",
+      "bytes": 42,
+      "lines": 3,
+      "score": 4,
+      "seed_score": 4,
+      "churn": 0,
+      "fix_touches": 0,
+      "markers": 0,
+      "imports": 0,
+      "incoming_refs": 0,
+      "smell_risk": 0,
+      "hotspot_risk": 0,
+      "sdk_dx_risk": 0,
+      "unknowns_risk": 0,
+      "env_contract_risk": 0,
+      "workflow_security_risk": 0,
+      "migration_safety_risk": 0,
+      "container_build_risk": 0,
+      "kubernetes_security_risk": 0,
+      "terraform_security_risk": 0,
+      "openapi_contract_risk": 0,
+      "cors_security_risk": 0,
+      "cookie_security_risk": 0,
+      "dependency_health_risk": 0,
+      "centrality_risk": 0,
+      "cochange_risk": 0,
+      "ownership_risk": 0,
+      "flake_risk": 0,
+      "oracle_risk": 0,
+      "stale_marker_risk": 0,
+      "test_gap": false,
+      "path_risk": 3,
+      "content_risk": 4,
+      "evidence_layers": [
+        "path-risk",
+        "content-risk"
+      ],
+      "reasons": [
+        "path:auth",
+        "content:unsafe_query:1"
+      ],
+      "summary": "auth entry point"
+    }
+  ]
+}

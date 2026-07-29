@@ -1,0 +1,12 @@
+{"schema":"slither.agent/v1","id":"error-01","ok":false,"error":{"code":"invalid_request"}}
+{"schema":"slither.agent/v1","id":"error-02","ok":false,"error":{"code":"unsupported_schema"}}
+{"schema":"slither.agent/v1","id":"error-03","ok":false,"error":{"code":"unsupported_op"}}
+{"schema":"slither.agent/v1","id":"error-04","ok":false,"error":{"code":"request_too_large"}}
+{"schema":"slither.agent/v1","id":"error-05","ok":false,"error":{"code":"budget_too_small"}}
+{"schema":"slither.agent/v1","id":"error-06","ok":false,"error":{"code":"budget_too_large"}}
+{"schema":"slither.agent/v1","id":"error-07","ok":false,"error":{"code":"target_not_found"}}
+{"schema":"slither.agent/v1","id":"error-08","ok":false,"error":{"code":"stale_evidence"}}
+{"schema":"slither.agent/v1","id":"error-09","ok":false,"error":{"code":"feedback_disabled"}}
+{"schema":"slither.agent/v1","id":"error-10","ok":false,"error":{"code":"feedback_write_failed"}}
+{"schema":"slither.agent/v1","id":"error-11","ok":false,"error":{"code":"scan_failed"}}
+{"schema":"slither.agent/v1","id":"error-12","ok":false,"error":{"code":"canceled"}}

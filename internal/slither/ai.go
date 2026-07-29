@@ -115,21 +115,14 @@ func (s *ModelScorer) ScoreBatch(ctx context.Context, batch []FileEvidence) ([]F
 		byIndex[sc.Index] = sc
 	}
 	for i := range out {
-		fallbackLayers := out[i].EvidenceLayers
 		sc, ok := byIndex[i]
 		if !ok {
-			out[i].Reasons = append(out[i].Reasons, "model_error:no model score for "+out[i].Path)
-			out[i].EvidenceLayers = evidenceLayersForReasons(out[i].Reasons)
+			degradeEvidence(&out[i], "model_error:no model score for "+out[i].Path)
 			continue
 		}
-		if sc.Score >= 1 && sc.Score <= 5 {
-			out[i].Score = sc.Score
+		if !applyModelScore(&out[i], sc.Score, sc.Summary, sc.Reasons) {
+			degradeEvidence(&out[i], "model_error:invalid model score for "+out[i].Path)
 		}
-		if sc.Summary != "" {
-			out[i].Summary = sc.Summary
-		}
-		out[i].Reasons = appendModelReasons(out[i].Reasons, sc.Reasons)
-		out[i].EvidenceLayers = mergeLayers(fallbackLayers, []string{"model"})
 	}
 	return out, nil
 }
@@ -157,7 +150,38 @@ func appendModelReasons(reasons, modelReasons []string) []string {
 // append a model_error reason, then recompute evidence layers from reasons.
 func degradeBatch(out []FileEvidence, err error) {
 	for i := range out {
-		out[i].Reasons = append(out[i].Reasons, "model_error:"+err.Error())
-		out[i].EvidenceLayers = evidenceLayersForReasons(out[i].Reasons)
+		degradeEvidence(&out[i], "model_error:"+err.Error())
 	}
+}
+
+// applyModelScore is the one selection path shared by fresh and cached model
+// results. Invalid scores never change compatibility score or provenance.
+func applyModelScore(row *FileEvidence, score int, summary string, reasons []string) bool {
+	if score < 1 || score > 5 {
+		return false
+	}
+	if row.ScoreProvenance.SelectedBy == "" {
+		setDeterministicProvenance(row)
+	}
+	row.Score = score
+	modelScore := score
+	row.ScoreProvenance.Model = &modelScore
+	row.ScoreProvenance.SelectedBy = "model"
+	if summary != "" {
+		row.Summary = summary
+	}
+	row.Reasons = appendModelReasons(row.Reasons, reasons)
+	row.EvidenceLayers = mergeLayers(row.EvidenceLayers, []string{"model"})
+	return true
+}
+
+func degradeEvidence(row *FileEvidence, reason string) {
+	if row.ScoreProvenance.SelectedBy == "" {
+		setDeterministicProvenance(row)
+	}
+	row.Score = row.ScoreProvenance.Deterministic
+	row.ScoreProvenance.Model = nil
+	row.ScoreProvenance.SelectedBy = "deterministic"
+	row.Reasons = append(row.Reasons, reason)
+	row.EvidenceLayers = evidenceLayersForReasons(row.Reasons)
 }

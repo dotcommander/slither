@@ -31,6 +31,7 @@ type scoringPatterns struct {
 	PathTerms       []fallbackTerm
 	ContentPatterns []contentPattern
 	Source          string
+	ID              string
 }
 
 func loadScoringPatterns(path string) (scoringPatterns, error) {
@@ -71,7 +72,7 @@ func parseScoringPatterns(data []byte, source string) (scoringPatterns, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return scoringPatterns{}, fmt.Errorf("parse patterns: %w", err)
 	}
-	patterns := scoringPatterns{Source: source}
+	patterns := scoringPatterns{Source: source, ID: sha256Identity("slither.patterns/v1", data)}
 	for index, item := range raw.PathTerms {
 		term := strings.TrimSpace(item.Term)
 		if term == "" {

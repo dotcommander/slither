@@ -1,0 +1,1 @@
+{"schema":"slither.eval/v1","reports":2,"outcomes":{"confirmed":1,"refuted":1,"unknown":1,"skipped":0},"context_cost":{"files_opened":3,"tool_calls":4,"review_ms":175}}

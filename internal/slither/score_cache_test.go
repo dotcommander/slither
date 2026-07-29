@@ -25,6 +25,11 @@ func TestScoreCacheKeyStableAndSensitive(t *testing.T) {
 	if scoreCacheKey("m", "", nil, a) == scoreCacheKey("m", "", nil, b) {
 		t.Fatal("key did not change with projected evidence")
 	}
+	b = a
+	b.ContentID = "sha256:different-content"
+	if scoreCacheKey("m", "", nil, a) == scoreCacheKey("m", "", nil, b) {
+		t.Fatal("key did not change with content identity")
+	}
 	// baseURL sensitivity
 	if scoreCacheKey("m", "http://a", nil, a) == scoreCacheKey("m", "http://b", nil, a) {
 		t.Fatal("key did not change with baseURL")
