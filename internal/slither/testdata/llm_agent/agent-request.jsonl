@@ -1,2 +1,5 @@
 {"schema":"slither.agent/v1","id":"hello-1","op":"hello"}
-{"schema":"slither.agent/v1","id":"context-1","op":"context","target_ids":["file:auth.go"],"budget_bytes":512}
+{"schema":"slither.agent/v1","id":"scan-1","op":"scan"}
+{"schema":"slither.agent/v1","id":"query-1","op":"query","target_ids":["slither:file:YXV0aC5nbw"],"focus":"TODO","limit":2}
+{"schema":"slither.agent/v1","id":"context-1","op":"context","target_ids":["slither:file:YXV0aC5nbw"],"budget_bytes":2048}
+{"schema":"slither.agent/v1","id":"feedback-1","op":"feedback","report_id":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence_id":"sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","verdict":"confirmed","files_opened":2,"tool_calls":3,"review_ms":125}

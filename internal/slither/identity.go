@@ -68,7 +68,7 @@ func normalizedReportParameters(opts Options, patternsID string) ReportParameter
 	}
 	if opts.Model != "" {
 		p.Model = opts.Model
-		p.BaseURL = opts.BaseURL
+		p.BaseURL = scrubOutputSecrets(opts.BaseURL)
 		// Provider fallback order and duplicate entries are part of the scoring
 		// contract, unlike include/exclude alternatives.
 		p.FallbackModels = append([]string(nil), opts.FallbackModels...)

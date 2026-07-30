@@ -2,6 +2,7 @@ package slither
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,6 +154,61 @@ func TestScrubOutputSecretsPreservesNonSecretProse(t *testing.T) {
 	} {
 		if got := scrubOutputSecrets(want); got != want {
 			t.Fatalf("non-secret prose = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestReportOutputsStripBaseURLUserinfo(t *testing.T) {
+	t.Parallel()
+	const secret = "private-password"
+	report := Report{
+		Model:   "model",
+		BaseURL: "https://user:" + secret + "@example.test/v1",
+		Parameters: ReportParameters{
+			Model:   "model",
+			BaseURL: "https://user:" + secret + "@example.test/v1",
+		},
+	}
+
+	data, err := RenderJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markdown := RenderMarkdown(report)
+	for name, output := range map[string]string{"JSON": string(data), "Markdown": markdown} {
+		if strings.Contains(output, secret) || strings.Contains(output, "user@") {
+			t.Fatalf("%s leaked URL userinfo: %s", name, output)
+		}
+		if !strings.Contains(output, "https://example.test/v1") {
+			t.Fatalf("%s omitted sanitized endpoint: %s", name, output)
+		}
+	}
+}
+
+func TestDegradedModelErrorStripsBaseURLUserinfo(t *testing.T) {
+	t.Parallel()
+	rows := []FileEvidence{{Path: "main.go", Score: 1}}
+	degradeBatch(rows, errors.New("POST https://user:private-password@example.test/v1 failed"))
+	if got := strings.Join(rows[0].Reasons, "\n"); strings.Contains(got, "private-password") || strings.Contains(got, "user@") {
+		t.Fatalf("degraded reason leaked URL userinfo: %q", got)
+	}
+}
+
+func TestModelProseIsScrubbedBeforeStorage(t *testing.T) {
+	t.Parallel()
+	row := FileEvidence{Path: "main.go", Score: 1}
+	if !applyModelScore(
+		&row,
+		4,
+		"Authorization: Bearer privateBearerToken123",
+		[]string{"POST https://user:private-password@example.test/v1"},
+	) {
+		t.Fatal("valid model score was rejected")
+	}
+	prose := row.Summary + "\n" + strings.Join(row.Reasons, "\n")
+	for _, secret := range []string{"privateBearerToken123", "private-password", "user@"} {
+		if strings.Contains(prose, secret) {
+			t.Fatalf("stored model prose leaked %q: %s", secret, prose)
 		}
 	}
 }

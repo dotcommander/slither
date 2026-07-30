@@ -42,13 +42,98 @@ func TestRuntimeSeamCurrentTimeControlsReportAndStaleMarkerAge(t *testing.T) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, output)
 	}
-	stale, skip := staleMarkersByFile(context.Background(), gitRepo, []string{path}, 1<<10)
+	stale, skip := staleMarkersByFile(context.Background(), gitRepo, []string{path}, 1<<10, fixed)
 	if skip != "" {
 		t.Fatalf("stale marker skip = %q", skip)
 	}
 	if got := stale["stale.go"].OldestDays; got != 183 {
 		t.Fatalf("stale marker age = %d, want 183", got)
 	}
+}
+
+func TestOptionsAsOfControlsHistoryAndStaleMarkerSignals(t *testing.T) {
+	asOf := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	repo := t.TempDir()
+	runGitTestCommand(t, repo, "init", "-q")
+	runGitTestCommand(t, repo, "config", "user.email", "slither@example.test")
+	runGitTestCommand(t, repo, "config", "user.name", "Slither Test")
+
+	oldPath := filepath.Join(repo, "auth.go")
+	if err := os.WriteFile(oldPath, []byte("package sample\n// TODO: old marker\nfunc Old() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTestCommand(t, repo, "add", "--", "auth.go")
+	commitAt(t, repo, "2023-01-01T00:00:00Z", "add old marker")
+
+	recentPath := filepath.Join(repo, "recent.go")
+	if err := os.WriteFile(recentPath, []byte("package sample\nfunc Recent() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTestCommand(t, repo, "add", "--", "recent.go")
+	commitAt(t, repo, "2023-12-15T00:00:00Z", "add recent source")
+
+	futurePath := filepath.Join(repo, "future.go")
+	if err := os.WriteFile(futurePath, []byte("package sample\nfunc Future() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTestCommand(t, repo, "add", "--", "future.go")
+	commitAt(t, repo, "2024-02-01T00:00:00Z", "add future source")
+
+	previous := currentTime
+	t.Cleanup(func() { currentTime = previous })
+	build := func(wallClock time.Time) Report {
+		t.Helper()
+		currentTime = func() time.Time { return wallClock }
+		report, err := BuildReport(context.Background(), Options{
+			Repo: repo, Top: 10, MaxBytes: 1 << 10, Days: 90, AsOf: asOf, NoCache: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+
+	first := build(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
+	second := build(time.Date(2040, 1, 1, 0, 0, 0, 0, time.UTC))
+	if !first.GeneratedAt.Equal(asOf) || !second.GeneratedAt.Equal(asOf) {
+		t.Fatalf("generated times = %s and %s, want %s", first.GeneratedAt, second.GeneratedAt, asOf)
+	}
+	if first.ReportID != second.ReportID {
+		t.Fatalf("fixed-AsOf report IDs differ: %s != %s", first.ReportID, second.ReportID)
+	}
+	firstRecent := evidenceByPath(t, first.Rows, "recent.go")
+	secondRecent := evidenceByPath(t, second.Rows, "recent.go")
+	if firstRecent.Churn == 0 || firstRecent.Churn != secondRecent.Churn {
+		t.Fatalf("recent churn = %d and %d, want identical non-zero history", firstRecent.Churn, secondRecent.Churn)
+	}
+	if future := evidenceByPath(t, first.Rows, "future.go"); future.Churn != 0 {
+		t.Fatalf("future churn = %d, want absolute until cutoff to exclude it", future.Churn)
+	}
+	firstOld := evidenceByPath(t, first.Rows, "auth.go")
+	secondOld := evidenceByPath(t, second.Rows, "auth.go")
+	if firstOld.StaleMarkerRisk == 0 || firstOld.StaleMarkerRisk != secondOld.StaleMarkerRisk {
+		t.Fatalf("stale marker risk = %d and %d, want identical non-zero signal", firstOld.StaleMarkerRisk, secondOld.StaleMarkerRisk)
+	}
+}
+
+func commitAt(t *testing.T, repo, timestamp, message string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repo, "commit", "-q", "-m", message)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+timestamp, "GIT_COMMITTER_DATE="+timestamp)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, output)
+	}
+}
+
+func evidenceByPath(t *testing.T, rows []FileEvidence, path string) FileEvidence {
+	t.Helper()
+	for _, row := range rows {
+		if row.Path == path {
+			return row
+		}
+	}
+	t.Fatalf("missing evidence row %q", path)
+	return FileEvidence{}
 }
 
 func TestSourceReaderSeamRoutesInspectionAndScoreContextReads(t *testing.T) {
@@ -84,20 +169,22 @@ func TestSourceReaderSeamRoutesInspectionAndScoreContextReads(t *testing.T) {
 }
 
 func TestRuntimeSeamOutcomeWriterFuncAdapterPassesOneRecordAndContext(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "key", "value")
-	record := []byte(`{"schema":"slither.outcome/v1"}`)
+	type contextKey string
+	ctx := context.WithValue(context.Background(), contextKey("key"), "value")
+	report := Report{ReportID: exampleReportID}
+	feedback := outcomeFeedback{ReportID: exampleReportID, EvidenceID: exampleEvidenceID, Verdict: "confirmed"}
 	called := false
-	writer := outcomeWriterFunc(func(gotCtx context.Context, gotRecord []byte) error {
+	writer := outcomeWriterFunc(func(gotCtx context.Context, gotReport Report, gotFeedback outcomeFeedback) error {
 		called = true
 		if gotCtx != ctx {
 			t.Fatal("outcome context was not forwarded")
 		}
-		if string(gotRecord) != string(record) {
-			t.Fatalf("outcome record = %q, want %q", gotRecord, record)
+		if gotReport.ReportID != report.ReportID || gotFeedback != feedback {
+			t.Fatalf("outcome input = %#v/%#v, want %#v/%#v", gotReport, gotFeedback, report, feedback)
 		}
 		return nil
 	})
-	if err := writer.WriteOutcome(ctx, record); err != nil {
+	if err := writer.WriteOutcome(ctx, report, feedback); err != nil {
 		t.Fatal(err)
 	}
 	if !called {

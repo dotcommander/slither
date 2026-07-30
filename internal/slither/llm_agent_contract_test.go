@@ -64,6 +64,34 @@ func TestContractFixturesValidate(t *testing.T) {
 			}
 		}
 	}
+	requests := fixtureJSONL(t, "agent-request.jsonl")
+	if len(requests) != 5 {
+		t.Fatalf("agent requests = %d, want one fixture for each operation", len(requests))
+	}
+	for index, want := range []string{"hello", "scan", "query", "context", "feedback"} {
+		if got, _ := requests[index]["op"].(string); got != want {
+			t.Fatalf("agent request %d operation = %q, want %q", index, got, want)
+		}
+	}
+	queryIDs := jsonArray(t, requests[2]["target_ids"], "query target ids")
+	if got, _ := queryIDs[0].(string); !validLogicalFileID(got) {
+		t.Fatalf("query target id = %#v, want slither:file: base64 ID", queryIDs[0])
+	}
+	responses := fixtureJSONL(t, "agent-response.jsonl")
+	if len(responses) != 1 {
+		t.Fatalf("agent responses = %d, want fixed hello response", len(responses))
+	}
+	hello := jsonObject(t, responses[0]["result"], "hello result")
+	if enabled, ok := hello["feedback_enabled"].(bool); !ok || enabled {
+		t.Fatalf("hello feedback_enabled = %#v, want false", hello["feedback_enabled"])
+	}
+	for _, key := range []string{"max_request_bytes", "max_context_bytes"} {
+		if got, ok := fixtureInt(hello[key]); !ok || got != oneMiB {
+			t.Fatalf("hello %s = %#v, want %d", key, hello[key], oneMiB)
+		}
+	}
+	assertStringArray(t, hello["schemas"], []string{"slither.report/v1", "slither.context/v1", "slither.outcome/v1", "slither.eval/v1"}, "hello schemas")
+	assertStringArray(t, hello["operations"], []string{"hello", "scan", "query", "context", "feedback"}, "hello operations")
 
 	errors := fixtureJSONL(t, "agent-error.jsonl")
 	var errorCodes []string
@@ -95,11 +123,63 @@ func TestContractFixturesValidate(t *testing.T) {
 	if used > budget || used > oneMiB {
 		t.Fatalf("context fixture bytes = %d, budget = %d", used, budget)
 	}
+	targets := jsonArray(t, contextPacket["targets"], "context targets")
+	if len(targets) != 1 {
+		t.Fatalf("context targets = %#v, want one representative target", targets)
+	}
+	target := jsonObject(t, targets[0], "context target")
+	assertJSONKeys(t, target, []string{"id", "evidence_id", "path", "actionability", "caveat", "evidence_locations", "proof_obligation", "resolution", "components"})
+	if !validLogicalFileID(target["id"].(string)) || !validSHA256Identity(target["evidence_id"].(string)) {
+		t.Fatalf("context target identities = %#v", target)
+	}
+	proof := jsonObject(t, target["proof_obligation"], "proof obligation")
+	assertJSONKeys(t, proof, []string{"id", "target_id", "hypothesis", "support", "falsifiers", "promotion_gate", "verify"})
+	if !validSHA256Identity(proof["id"].(string)) || proof["target_id"] != target["id"] {
+		t.Fatalf("context proof identity = %#v", proof)
+	}
+	if _, ok := proof["support"].([]any); !ok {
+		t.Fatalf("context proof support = %#v, want array", proof["support"])
+	}
+	if _, ok := proof["verify"].([]any); !ok {
+		t.Fatalf("context proof verify = %#v, want array", proof["verify"])
+	}
+	falsifiers := jsonArray(t, proof["falsifiers"], "context proof falsifiers")
+	for index, value := range falsifiers {
+		falsifier := jsonObject(t, value, fmt.Sprintf("context falsifier %d", index))
+		if _, ok := falsifier["operation"].(string); !ok {
+			t.Fatalf("context falsifier %d operation = %#v", index, falsifier["operation"])
+		}
+		for key := range falsifier {
+			if key != "operation" && key != "path" && key != "query" && key != "subject" && key != "command" {
+				t.Fatalf("context falsifier %d has unexpected key %q", index, key)
+			}
+		}
+	}
+	components := jsonArray(t, target["components"], "context components")
+	if len(components) != 1 {
+		t.Fatalf("context components = %#v", components)
+	}
+	assertJSONKeys(t, jsonObject(t, components[0], "context component"), []string{"kind", "id", "path", "text"})
 
 	validateOutcomeFixture(t, "outcome.jsonl", false)
 	validateOutcomeFixture(t, "outcome-partial-tail.jsonl", true)
 	evaluation := fixtureJSONObject(t, "eval-v1.json")
 	requireSchema(t, evaluation, "slither.eval/v1")
+}
+
+func assertStringArray(t *testing.T, value any, want []string, name string) {
+	t.Helper()
+	values := jsonArray(t, value, name)
+	got := make([]string, len(values))
+	for index, value := range values {
+		var ok bool
+		if got[index], ok = value.(string); !ok {
+			t.Fatalf("%s[%d] = %#v, want string", name, index, value)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("%s = %#v, want %#v", name, got, want)
+	}
 }
 
 func TestLegacyJSONEnvelopeKeyInventory(t *testing.T) {
@@ -296,67 +376,69 @@ func TestScoreProvenanceContract(t *testing.T) {
 }
 
 func TestContextPacketSelectionContract(t *testing.T) {
-	t.Skip("Phase C: context target selection is not implemented")
+	TestBuildContextPacketSelectionFocusAndDefault(t)
 }
 
 func TestContextPacketBudgetContract(t *testing.T) {
-	t.Skip("Phase C: context byte budgets are not implemented")
+	TestBuildContextPacketBudgetAccountingAndOmissions(t)
 }
 
 func TestContextPacketSafetyContract(t *testing.T) {
-	t.Skip("Phase C: context safety and redaction are not implemented")
+	TestBuildContextPacketSafetyCancellationAndUniqueReads(t)
 }
 
 func TestContextPacketDeterminismContract(t *testing.T) {
-	t.Skip("Phase C: deterministic context packets are not implemented")
+	TestBuildContextPacketDeclarationLexicalAndComponents(t)
 }
 
 func TestContextPacketCancellationContract(t *testing.T) {
-	t.Skip("Phase C: context cancellation is not implemented")
+	TestBuildContextPacketSafetyCancellationAndUniqueReads(t)
 }
 
 func TestContextPacketNoRescanContract(t *testing.T) {
-	t.Skip("Phase C: selected-only context reads are not implemented")
+	TestContextImportGraphPreservesCountsAndRanking(t)
 }
 
 func TestProofObligationContract(t *testing.T) {
-	t.Skip("Phase D: deterministic proof obligations are not implemented")
+	assertProofObligationContract(t)
 }
 
 func TestPromotionGateContract(t *testing.T) {
-	t.Skip("Phase D: closed actionability mapping and production-witness restrictions are not implemented")
+	assertPromotionGateContract(t)
 }
 
 func TestAgentFramingContract(t *testing.T) {
-	t.Skip("Phase E: Agent Bridge JSONL framing is not implemented")
+	TestAgentProtocolFramingBoundaries(t)
 }
 
 func TestAgentOperationsContract(t *testing.T) {
-	t.Skip("Phase E: Agent Bridge operations are not implemented")
+	TestAgentOperationsAndOfflineContract(t)
 }
 
 func TestAgentRecoveryContract(t *testing.T) {
-	t.Skip("Phase E: Agent Bridge error recovery is not implemented")
+	TestAgentRecoveryAndFeedbackSeam(t)
 }
 
 func TestAgentEOFContract(t *testing.T) {
-	t.Skip("Phase E: Agent Bridge clean EOF behavior is not implemented")
+	TestAgentEOFAndSnapshotInvalidation(t)
 }
 
 func TestAgentHelpContract(t *testing.T) {
-	t.Skip("Phase E: Agent Bridge help is not implemented")
+	TestAgentHelpAndOutcomesSeam(t)
 }
 
 func TestAgentCancellationContract(t *testing.T) {
-	t.Skip("Phase E: Agent Bridge cancellation is not implemented")
+	TestAgentCancellationAndFatalOutput(t)
 }
 
 func TestOutcomeSecurityPrivacyContract(t *testing.T) {
-	t.Skip("Phase F: secure private outcome persistence is not implemented")
+	TestOutcomeDerivesTypedRecordAndAppendsOwnerOnly(t)
+	TestOutcomeWriterRejectsUnsafeExistingTargets(t)
 }
 
 func TestEvalMultiReportContract(t *testing.T) {
-	t.Skip("Phase F: deterministic multi-report evaluation is not implemented")
+	TestEvalStreamsMultiReportOutcomesAndPartialTail(t)
+	TestEvalRejectsDuplicateReportIdentityAndIntegrityMismatch(t)
 }
 
 func assertFixtureBytes(t *testing.T, name string, got []byte) {
@@ -653,19 +735,6 @@ func validOutcomeLane(lane string) bool {
 		"culled_duplicate_surface":   true,
 		"needs_more_evidence":        true,
 	}[lane]
-}
-
-func outcomeValueLooksPrivate(value string) bool {
-	lower := strings.ToLower(value)
-	if strings.Contains(value, "/") || strings.Contains(value, "\\") || strings.Contains(value, "://") {
-		return true
-	}
-	for _, marker := range []string{"credential", "secret", "password", "api_key", "authorization:"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func assertJSONKeys(t *testing.T, value map[string]any, want []string) {

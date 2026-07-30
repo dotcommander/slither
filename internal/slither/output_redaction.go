@@ -7,6 +7,10 @@ var outputSecretPatterns = []struct {
 	replacement string
 }{
 	{
+		pattern:     regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)[^/?#@\s]+@`),
+		replacement: `${1}`,
+	},
+	{
 		pattern:     regexp.MustCompile(`(?i)(\bBearer[ \t]+)[A-Za-z0-9._~+/=-]{12,}(["',;)\]}]|$)`),
 		replacement: `${1}[redacted]${2}`,
 	},

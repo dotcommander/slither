@@ -91,3 +91,37 @@ func TestManifestConsumersReadValidFiles(t *testing.T) {
 		t.Fatal("valid composer script unavailable")
 	}
 }
+
+func TestManifestConsumersRejectSymlinks(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "package.json")
+	if err := os.WriteFile(outside, []byte(`{"scripts":{"test":"outside command"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repo, "package.json")); err != nil {
+		t.Skipf("create manifest symlink: %v", err)
+	}
+
+	if data, ok := readRepoManifest(repo, "package.json"); ok || data != nil {
+		t.Fatalf("symlink manifest available = %t with %d bytes", ok, len(data))
+	}
+	if packageHasScript(repo, "test") {
+		t.Fatal("script from symlink manifest was accepted")
+	}
+	if got := verificationProfileForRepo(repo); got != "" {
+		t.Fatalf("verification profile = %q, want empty for symlink manifest", got)
+	}
+
+	lockDir := t.TempDir()
+	outsideLock := filepath.Join(t.TempDir(), "bun.lock")
+	if err := os.WriteFile(outsideLock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideLock, filepath.Join(lockDir, "bun.lock")); err != nil {
+		t.Skipf("create lockfile symlink: %v", err)
+	}
+	if packageUsesBun(lockDir) {
+		t.Fatal("symlink lockfile selected bun")
+	}
+}

@@ -35,7 +35,7 @@ func RenderMarkdown(report Report) string {
 	if report.Model == "" {
 		fmt.Fprintf(&b, "- Scoring: deterministic fallback\n\n")
 	} else {
-		fmt.Fprintf(&b, "- Scoring: wormhole model `%s` at `%s`\n\n", report.Model, report.BaseURL)
+		fmt.Fprintf(&b, "- Scoring: wormhole model `%s` at `%s`\n\n", report.Model, scrubOutputSecrets(report.BaseURL))
 	}
 	if report.CacheStats != nil {
 		fmt.Fprintf(&b, "- Score cache: `%d` hits, `%d` misses\n\n", report.CacheStats.Hits, report.CacheStats.Misses)
@@ -610,13 +610,15 @@ func formatScoreBreakdown(components []WhyTopScoreComponent) string {
 
 func RenderJSON(report Report) ([]byte, error) {
 	legacy := legacyReportJSONProjection(report)
+	parameters := report.Parameters
+	parameters.BaseURL = scrubOutputSecrets(parameters.BaseURL)
 	payload := reportEnvelopeV1{
 		reportEnvelope: legacy,
 		Rows:           reportJSONRows(report),
 		SchemaVersion:  report.SchemaVersion,
 		ReportID:       report.ReportID,
 		SourceState:    report.SourceState,
-		Parameters:     report.Parameters,
+		Parameters:     parameters,
 	}
 	if payload.SchemaVersion == "" {
 		payload.SchemaVersion = reportSchemaVersion
@@ -649,7 +651,7 @@ func legacyReportJSONProjection(report Report) reportEnvelope {
 		RowCount:       len(report.Rows),
 		Discovery:      report.Discovery,
 		Model:          report.Model,
-		BaseURL:        report.BaseURL,
+		BaseURL:        scrubOutputSecrets(report.BaseURL),
 		SkippedSignals: report.SkippedSignals,
 		Filters:        report.Filters,
 		Rows:           rows,

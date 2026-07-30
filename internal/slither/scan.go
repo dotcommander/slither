@@ -36,9 +36,18 @@ type fallbackTerm struct {
 }
 
 func BuildReport(ctx context.Context, opts Options) (Report, error) {
+	return buildReport(ctx, opts, 0)
+}
+
+func buildReport(ctx context.Context, opts Options, inspectWorkers int) (result Report, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	asOf := opts.AsOf
+	if asOf.IsZero() {
+		asOf = currentTime()
+	}
+	asOf = asOf.UTC()
 	if opts.Days <= 0 {
 		opts.Days = 90
 	}
@@ -63,24 +72,38 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	scoreCtx := newScoreContext(ctx, opts.Repo, paths, opts.MaxBytes, opts.Days, patterns)
+	scoreCtx := newScoreContext(ctx, opts.Repo, paths, opts.MaxBytes, opts.Days, asOf, patterns)
 	skippedSignals = append(skippedSignals, scoreCtx.skipped...)
 	scorer, err := NewModelScorer(opts)
 	if err != nil {
 		return Report{}, err
 	}
+	if scorer != nil {
+		defer func() {
+			if err := scorer.Close(); err != nil {
+				result = Report{}
+				retErr = errors.Join(retErr, fmt.Errorf("close model scorer: %w", err))
+			}
+		}()
+	}
 	if scorer == nil {
 		skippedSignals = append(skippedSignals, "model_scoring:not_configured")
 	}
-	rows, skipped, err := inspectFiles(ctx, opts.Repo, paths, opts.MaxBytes, scoreCtx)
+	var rows []FileEvidence
+	var skipped int
+	if inspectWorkers > 0 {
+		rows, skipped, err = inspectFilesWithWorkers(ctx, opts.Repo, paths, opts.MaxBytes, scoreCtx, inspectWorkers)
+	} else {
+		rows, skipped, err = inspectFiles(ctx, opts.Repo, paths, opts.MaxBytes, scoreCtx)
+	}
 	if err != nil {
 		return Report{}, err
 	}
 	baseURL := ""
 	if opts.Model != "" {
-		baseURL = opts.BaseURL
+		baseURL = scrubOutputSecrets(opts.BaseURL)
 	}
-	report := Report{SchemaVersion: reportSchemaVersion, Repo: opts.Repo, GeneratedAt: currentTime(), Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals, Filters: ReportFilters{Focus: opts.Focus, Include: opts.Include, Exclude: opts.Exclude, Inventory: opts.Inventory}, Parameters: normalizedReportParameters(opts, patterns.ID)}
+	report := Report{SchemaVersion: reportSchemaVersion, Repo: opts.Repo, GeneratedAt: asOf, Days: opts.Days, PatternsSource: patterns.Source, FilesSeen: len(paths), Discovery: discovery, Model: opts.Model, BaseURL: baseURL, Build: CurrentBuildInfo(), SkippedSignals: skippedSignals, Filters: ReportFilters{Focus: opts.Focus, Include: opts.Include, Exclude: opts.Exclude, Inventory: opts.Inventory}, Parameters: normalizedReportParameters(opts, patterns.ID)}
 	if skipped > 0 {
 		report.SkippedSignals = append(report.SkippedSignals, "scan:unreadable_skipped:"+itoa(skipped))
 	}
@@ -138,11 +161,13 @@ func BuildReport(ctx context.Context, opts Options) (Report, error) {
 		}
 		report.Rows = append(report.Rows, evidence)
 	}
+	report.contextRows = append([]FileEvidence(nil), rows...)
+	report.contextEdges = append([]localImportEdge(nil), scoreCtx.localImports...)
 	sortReportRows(report.Rows)
 	report.Rows = selectRowsForTop(report.Rows, opts.Top)
 	report.FilesScored = len(report.Rows)
-	if opts.Inventory == "data-integrity" {
-		report.FirstReadQueue, report.ReviewPlan = BuildDataIntegrityInventoryForRepo(opts.Repo, report.Rows)
+	if opts.Inventory != "" {
+		report.FirstReadQueue, report.ReviewPlan = BuildInventoryForRepo(opts.Repo, report.Rows, opts.Inventory)
 	} else {
 		report.FirstReadQueue, report.ReviewPlan = BuildReviewPlanForRepo(opts.Repo, report.Rows)
 	}
@@ -321,17 +346,6 @@ func rowMatchesFocus(row FileEvidence, focus *regexp.Regexp) bool {
 	return focus.MatchString(haystack)
 }
 
-func rowMatchesInventory(row FileEvidence, inventory string) bool {
-	switch inventory {
-	case "":
-		return true
-	case "data-integrity":
-		return isDataIntegrityRow(row)
-	default:
-		return false
-	}
-}
-
 func selectRowsForTop(rows []FileEvidence, top int) []FileEvidence {
 	if top <= 0 || len(rows) <= top {
 		return rows
@@ -372,16 +386,22 @@ func modelScoreLimit(top, n int) int {
 }
 
 func inspectFiles(ctx context.Context, repo string, paths []string, maxBytes int64, scoreCtx scoreContext) ([]FileEvidence, int, error) {
+	return inspectFilesWithWorkers(ctx, repo, paths, maxBytes, scoreCtx, inspectWorkerCount(len(paths)))
+}
+
+func inspectFilesWithWorkers(ctx context.Context, repo string, paths []string, maxBytes int64, scoreCtx scoreContext, workers int) ([]FileEvidence, int, error) {
 	if len(paths) == 0 {
 		return nil, 0, nil
 	}
+	if workers <= 0 {
+		workers = 1
+	}
+	workers = min(workers, len(paths))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	jobs := make(chan string)
 	results := make(chan inspectResult, len(paths))
-	workers := inspectWorkerCount(len(paths))
-
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
@@ -723,14 +743,20 @@ func readTextPrefixWithStatus(path string, maxBytes int64) (string, bool, bool, 
 		return "", false, false, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
+	return readTextPrefixReaderWithStatus(f, maxBytes)
+}
+
+// readTextPrefixReaderWithStatus preserves the bounded UTF-8 and binary
+// semantics for callers that already hold a confined descriptor.
+func readTextPrefixReaderWithStatus(reader io.Reader, maxBytes int64) (string, bool, bool, error) {
 	readLimit := maxBytes
 	const maxInt64 = int64(^uint64(0) >> 1)
 	if maxBytes <= maxInt64-utf8.UTFMax {
 		readLimit += utf8.UTFMax
 	}
-	data, err := io.ReadAll(io.LimitReader(f, readLimit))
+	data, err := io.ReadAll(io.LimitReader(reader, readLimit))
 	if err != nil {
-		return "", false, false, fmt.Errorf("read %s: %w", path, err)
+		return "", false, false, fmt.Errorf("read source: %w", err)
 	}
 	if len(data) == 0 || strings.Contains(string(data[:min(len(data), 4096)]), "\x00") {
 		return "", false, false, nil

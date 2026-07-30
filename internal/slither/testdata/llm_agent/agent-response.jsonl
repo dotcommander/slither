@@ -1,2 +1,1 @@
-{"schema":"slither.agent/v1","id":"hello-1","ok":true,"result":{"protocol":"slither.agent/v1","schemas":["slither.report/v1","slither.context/v1"]}}
-{"schema":"slither.agent/v1","id":"context-1","ok":true,"result":{"schema":"slither.context/v1","budget_bytes":512,"used_bytes":256,"targets":[]}}
+{"schema":"slither.agent/v1","id":"hello-1","ok":true,"result":{"feedback_enabled":false,"max_context_bytes":1048576,"max_request_bytes":1048576,"operations":["hello","scan","query","context","feedback"],"protocol":"slither.agent/v1","schemas":["slither.report/v1","slither.context/v1","slither.outcome/v1","slither.eval/v1"]}}

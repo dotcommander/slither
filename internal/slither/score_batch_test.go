@@ -244,6 +244,11 @@ func TestNewModelScorerThreadsFallbackModels(t *testing.T) {
 	if s == nil {
 		t.Fatal("expected scorer for non-empty model")
 	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 	if len(s.fallbackModels) != 2 || s.fallbackModels[0] != "fb1" || s.fallbackModels[1] != "fb2" {
 		t.Fatalf("fallbackModels = %#v, want [fb1 fb2]", s.fallbackModels)
 	}
@@ -264,6 +269,11 @@ func TestNewModelScorerCustomAPIKeyEnvHonored(t *testing.T) {
 	if s == nil {
 		t.Fatal("expected scorer for non-empty model with custom API key env")
 	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 }
 
 func TestNewModelScorerOpenRouterDoesNotRequireImplicitDefaultEnv(t *testing.T) {
@@ -281,6 +291,11 @@ func TestNewModelScorerOpenRouterDoesNotRequireImplicitDefaultEnv(t *testing.T) 
 	if s == nil {
 		t.Fatal("expected scorer for non-empty model without an explicit credential env")
 	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 	if got := modelAPIKey(opts); got != "" {
 		t.Fatalf("modelAPIKey = %q, want no implicit OPENROUTER_API_KEY", got)
 	}

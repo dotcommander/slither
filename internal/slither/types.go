@@ -5,6 +5,7 @@ import "time"
 type Options struct {
 	Repo           string
 	Out            string
+	AsOf           time.Time
 	Top            int
 	MaxBytes       int64
 	Days           int
@@ -19,6 +20,7 @@ type Options struct {
 	APIKeyEnv      string
 	Local          bool
 	JSON           bool
+	Summary        bool
 	Cull           bool
 	FallbackModels []string
 	NoCache        bool
@@ -161,6 +163,8 @@ type Report struct {
 	FreshnessHint  string
 	CullLedger     *CullLedger
 	CacheStats     *CacheStats
+	contextRows    []FileEvidence
+	contextEdges   []localImportEdge
 }
 
 type SourceState struct {

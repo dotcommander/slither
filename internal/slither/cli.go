@@ -2,13 +2,12 @@ package slither
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -20,46 +19,151 @@ const (
 )
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		printHelp(stdout)
+	return RunWithIO(ctx, args, os.Stdin, stdout, stderr)
+}
+
+// RunWithIO is the in-process entry point. Agent mode needs explicit standard
+// input so callers can exercise its JSONL protocol without replacing process
+// globals; legacy commands intentionally retain their existing behavior.
+func RunWithIO(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		printRootHelp(stdout)
 		return nil
+	}
+	if args[0] == "help" {
+		if len(args) == 1 {
+			printRootHelp(stdout)
+			return nil
+		}
+		if len(args) != 2 {
+			return usageError("", errors.New("help accepts at most one command"))
+		}
+		if len(args) == 2 && printCommandHelp(stdout, args[1]) {
+			return nil
+		}
+		return usageError("", fmt.Errorf("unknown command %q", args[1]))
+	}
+	if commandHelpRequested(args[0], args[1:]) {
+		if printCommandHelp(stdout, args[0]) {
+			return nil
+		}
+	}
+	// Keep the established `slither COMMAND help` spelling, while only treating
+	// flags as help requests when they are not values for another flag.
+	if len(args) > 1 && args[1] == "help" {
+		if printCommandHelp(stdout, args[0]) {
+			return nil
+		}
 	}
 
 	switch args[0] {
 	case "version":
-		printVersion(args[1:], stdout)
-		return nil
+		return runVersion(args[1:], stdout)
+	case "doctor":
+		err := runDoctor(ctx, args[1:], stdout)
+		return commandError("doctor", err)
+	case "outputs":
+		err := runOutputs(args[1:], stdout)
+		return commandError("outputs", err)
+	case "completion":
+		err := runCompletion(args[1:], stdout)
+		return commandError("completion", err)
 	case "report":
-		return runReport(ctx, args[1:], stdout)
+		err := runReport(ctx, args[1:], stdout)
+		return commandError("report", err)
+	case "agent":
+		err := runAgent(ctx, args[1:], stdin, stdout, stderr)
+		return commandError("agent", err)
+	case "eval":
+		err := runEval(ctx, args[1:], stdout)
+		return commandError("eval", err)
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		return usageError("", fmt.Errorf("unknown command %q", args[0]))
 	}
 }
 
-func printHelp(w io.Writer) {
-	cfg := defaultConfig()
-	fmt.Fprintf(w, `slither - a cheap-model scout that creeps through every path
-
-Usage:
-  slither version [--build]
-  slither report [repo] [--out %s] [--top %d] [--max-bytes %d] [--days %d]
-  slither report [repo] --focus "postgres|pgx|migration" --why-top 10
-  slither report [repo] --include "internal/**" --exclude "**/*_test.go"
-  slither report [repo] --json --out slither-report.json
-  slither report [repo] --cull --json --out slither-cull.json
-  slither report [repo] --patterns triage_patterns.json --json
-  slither report [repo] --model z-ai/glm-5.2 --base-url %s
-  slither report [repo] --local
-
-Model scoring:
-  Slither uses github.com/garyblankenship/wormhole for model calls, matching distill.
-  If --model is omitted, slither uses deterministic fallback scoring.
-  --local selects %s at %s unless overridden.
-`, defaultOut, defaultTop, defaultMaxBytes, defaultDays, cfg.BaseURL, cfg.Local.Model, cfg.Local.BaseURL)
+// commandHelpRequested recognizes command help anywhere in the argument list.
+// It deliberately skips values consumed by the command's known value flags, so
+// paths and other values named --help or -h retain their ordinary meaning.
+func commandHelpRequested(command string, args []string) bool {
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			return false
+		}
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+		if commandFlagConsumesValue(command, arg) && index+1 < len(args) {
+			index++
+		}
+	}
+	return false
 }
 
-func printVersion(args []string, w io.Writer) {
+func commandFlagConsumesValue(command, arg string) bool {
+	switch command {
+	case "report":
+		switch arg {
+		case "-out", "--out", "-top", "--top", "-max-bytes", "--max-bytes", "-days", "--days", "-patterns", "--patterns", "-focus", "--focus", "-include", "--include", "-exclude", "--exclude", "-why-top", "--why-top", "-inventory", "--inventory", "-model", "--model", "-base-url", "--base-url", "-api-key-env", "--api-key-env":
+			return true
+		}
+	case "agent":
+		return arg == "-outcomes" || arg == "--outcomes"
+	case "eval":
+		return arg == "-outcomes" || arg == "--outcomes" ||
+			arg == "-report" || arg == "--report" ||
+			arg == "-out" || arg == "--out"
+	}
+	return false
+}
+
+type cliUsageError struct {
+	command string
+	err     error
+}
+
+func (e cliUsageError) Error() string {
+	if e.command == "" {
+		return e.err.Error() + "; run slither --help"
+	}
+	return e.err.Error() + "; run slither " + e.command + " --help"
+}
+func (e cliUsageError) Unwrap() error { return e.err }
+func usageError(command string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return cliUsageError{command: command, err: err}
+}
+
+func commandError(command string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var usage cliUsageError
+	if errors.As(err, &usage) {
+		return err
+	}
+	return err
+}
+
+func runVersion(args []string, w io.Writer) error {
+	if len(args) > 1 || (len(args) == 1 && args[0] != "--build" && args[0] != "--json") {
+		return usageError("version", fmt.Errorf("version accepts only --build or --json"))
+	}
 	info := CurrentBuildInfo()
+	if len(args) > 0 && args[0] == "--json" {
+		data, err := json.Marshal(struct {
+			Schema string `json:"schema"`
+			BuildInfo
+		}{Schema: "slither.version/v1", BuildInfo: info})
+		if err != nil {
+			return fmt.Errorf("encode version: %w", err)
+		}
+		_, err = fmt.Fprintln(w, string(data))
+		return err
+	}
 	if len(args) > 0 && args[0] == "--build" {
 		fmt.Fprintf(w, "slither %s\n", info.Summary())
 		if info.Module != "" {
@@ -72,161 +176,10 @@ func printVersion(args []string, w io.Writer) {
 			fmt.Fprintf(w, "go: %s\n", info.GoVersion)
 		}
 		fmt.Fprintf(w, "modified: %t\n", info.Modified)
-		return
+		return nil
 	}
 	fmt.Fprintf(w, "slither %s\n", info.Version)
-}
-
-func normalizeReportArgs(args []string) []string {
-	flagsWithValues := map[string]bool{
-		"-out": true, "--out": true,
-		"-top": true, "--top": true,
-		"-max-bytes": true, "--max-bytes": true,
-		"-days": true, "--days": true,
-		"-patterns": true, "--patterns": true,
-		"-focus": true, "--focus": true,
-		"-include": true, "--include": true,
-		"-exclude": true, "--exclude": true,
-		"-why-top": true, "--why-top": true,
-		"-inventory": true, "--inventory": true,
-		"-model": true, "--model": true,
-		"-base-url": true, "--base-url": true,
-		"-api-key-env": true, "--api-key-env": true,
-	}
-	var flags []string
-	var positionals []string
-	hadSeparator := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			hadSeparator = true
-			positionals = append(positionals, args[i+1:]...)
-			break
-		}
-		if !strings.HasPrefix(arg, "-") || arg == "-" {
-			positionals = append(positionals, arg)
-			continue
-		}
-		flags = append(flags, arg)
-		name := arg
-		if before, _, ok := strings.Cut(arg, "="); ok {
-			name = before
-		}
-		if flagsWithValues[name] && !strings.Contains(arg, "=") && i+1 < len(args) {
-			i++
-			flags = append(flags, args[i])
-		}
-	}
-	if hadSeparator {
-		flags = append(flags, "--")
-	}
-	return append(flags, positionals...)
-}
-
-// resolveReportOptions builds Options by precedence: explicit CLI flag >
-// config-file value > built-in default. Config values are seeded as the flag
-// defaults, so an unset flag yields the config value and an empty Model keeps
-// the deterministic offline path.
-func resolveReportOptions(cfg Config, args []string) (Options, error) {
-	fs := flag.NewFlagSet("report", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv, FallbackModels: cfg.FallbackModels}
-	include := stringListFlag{}
-	exclude := stringListFlag{}
-	fs.StringVar(&opts.Out, "out", opts.Out, "Markdown report path, or - for stdout")
-	fs.IntVar(&opts.Top, "top", opts.Top, "ranked production files to include")
-	fs.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum bytes to inspect per file")
-	fs.IntVar(&opts.Days, "days", opts.Days, "history window in days for churn and bug-fix signals")
-	fs.StringVar(&opts.Patterns, "patterns", "", "JSON path/content pattern file")
-	fs.StringVar(&opts.Focus, "focus", "", "regexp matched against path, evidence layers, reasons, and summary")
-	fs.Var(&include, "include", "path glob to include; repeat or comma-separate")
-	fs.Var(&exclude, "exclude", "path glob to exclude; repeat or comma-separate")
-	fs.IntVar(&opts.WhyTop, "why-top", 0, "include concise explanations for the top N ranked files")
-	fs.StringVar(&opts.Inventory, "inventory", "", "group a review-lane inventory; currently supports data-integrity")
-	fs.StringVar(&opts.Model, "model", opts.Model, "cheap model ID for wormhole scoring")
-	fs.StringVar(&opts.BaseURL, "base-url", opts.BaseURL, "OpenAI-compatible base URL")
-	fs.StringVar(&opts.APIKeyEnv, "api-key-env", opts.APIKeyEnv, "environment variable containing the API key")
-	fs.BoolVar(&opts.Local, "local", false, "use local OpenAI-compatible model profile")
-	fs.BoolVar(&opts.JSON, "json", false, "emit a machine-readable JSON evidence envelope")
-	fs.BoolVar(&opts.Cull, "cull", false, "append a cheap-model cull ledger over reported rows")
-	fs.BoolVar(&opts.NoCache, "no-cache", false, "disable the content-hash score cache")
-	if err := fs.Parse(normalizeReportArgs(args)); err != nil {
-		return Options{}, err
-	}
-	set := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	if fs.NArg() > 1 {
-		return Options{}, errors.New("report accepts at most one repo path")
-	}
-	if fs.NArg() == 1 {
-		opts.Repo = fs.Arg(0)
-	}
-	opts.Include = include.Values()
-	opts.Exclude = exclude.Values()
-	if opts.Top <= 0 {
-		return Options{}, errors.New("--top must be positive")
-	}
-	if opts.MaxBytes <= 0 {
-		return Options{}, errors.New("--max-bytes must be positive")
-	}
-	if opts.Days <= 0 {
-		return Options{}, errors.New("--days must be positive")
-	}
-	if opts.WhyTop < 0 {
-		return Options{}, errors.New("--why-top must be non-negative")
-	}
-	if opts.Inventory != "" && opts.Inventory != "data-integrity" {
-		return Options{}, errors.New("--inventory currently supports only data-integrity")
-	}
-	if opts.JSON && opts.Out == defaultOut {
-		opts.Out = "slither-report.json"
-	}
-	if opts.Local {
-		// Config fallback IDs are provider-specific (OpenRouter) and do not apply
-		// to the local single-model server; clear them to avoid futile failover.
-		opts.FallbackModels = nil
-		if opts.Model == "" {
-			opts.Model = cfg.Local.Model
-		}
-		if !set["base-url"] {
-			opts.BaseURL = cfg.Local.BaseURL
-		}
-		if !set["api-key-env"] {
-			opts.APIKeyEnv = cfg.Local.APIKeyEnv
-		}
-	}
-	if set["base-url"] && !set["api-key-env"] {
-		profileBaseURL := cfg.BaseURL
-		if opts.Local {
-			profileBaseURL = cfg.Local.BaseURL
-		}
-		if opts.BaseURL != profileBaseURL {
-			opts.APIKeyEnv = ""
-		}
-	}
-	return opts, nil
-}
-
-type stringListFlag struct {
-	values []string
-}
-
-func (f *stringListFlag) String() string {
-	return strings.Join(f.values, ",")
-}
-
-func (f *stringListFlag) Set(value string) error {
-	for _, part := range strings.Split(value, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			f.values = append(f.values, filepath.ToSlash(part))
-		}
-	}
 	return nil
-}
-
-func (f *stringListFlag) Values() []string {
-	return append([]string(nil), f.values...)
 }
 
 func existingReportFreshnessHint(ctx context.Context, opts Options) string {
@@ -279,7 +232,7 @@ func newestScannedFileModTime(ctx context.Context, opts Options) (time.Time, str
 
 func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
-		printHelp(stdout)
+		printCommandHelp(stdout, "report")
 		return nil
 	}
 	cfg, err := LoadOrCreateConfig()
@@ -317,7 +270,17 @@ func runReport(ctx context.Context, args []string, stdout io.Writer) error {
 		report.CullLedger = &ledger
 	}
 	var output []byte
-	if opts.JSON {
+	if opts.Summary {
+		summary := BuildReportSummary(report)
+		if opts.JSON {
+			output, err = RenderSummaryJSON(summary)
+			if err == nil {
+				output = append(output, '\n')
+			}
+		} else {
+			output = []byte(RenderSummaryMarkdown(summary))
+		}
+	} else if opts.JSON {
 		output, err = RenderJSON(report)
 		if err != nil {
 			return err

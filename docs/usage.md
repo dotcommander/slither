@@ -16,11 +16,18 @@ go run ./cmd/slither report /path/to/repo
 
 ## Command
 
-There are two commands: `report` and `version`.
+Commands are `report`, `version`, `doctor`, `outputs`, `completion`, `agent`,
+and `eval`. Every command supports `--help` and `-h`; `slither help COMMAND`
+prints the same command-specific reference.
 
 ```
 slither report [repo] [flags]
-slither version [--build]
+slither version [--build|--json]
+slither doctor [--json]
+slither outputs [surface] [--json]
+slither completion bash|zsh
+slither agent [repo] [--outcomes path]
+slither eval --outcomes path --report path [--report path...] (--json|--markdown) [--out -]
 ```
 
 `repo` defaults to the current directory (`.`).
@@ -38,12 +45,13 @@ slither version [--build]
 | `--include` | (none) | Path glob to include before inspection. Repeat or comma-separate values. Supports common `**` forms such as `internal/**` and `**/*_test.go`. |
 | `--exclude` | (none) | Path glob to exclude before inspection. Repeat or comma-separate values. |
 | `--why-top` | `0` | Add concise explanations for the top N ranked production files in Markdown and JSON. |
-| `--inventory` | (none) | Group a review-lane inventory instead of a general risk queue. Currently supports `data-integrity`. |
+| `--inventory` | (none) | Group one canonical review lane: `cli-ux`, `api-contracts`, `data-integrity`, `error-handling`, `dependency-policy`, `security`, `lifecycle-concurrency`, `performance`, `test-risk`, `coupling`, or `architecture`. |
 | `--model` | (none) | Cheap model ID for wormhole scoring. Omit for deterministic fallback. |
 | `--base-url` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL. |
 | `--api-key-env` | `OPENROUTER_API_KEY` | Environment variable holding the API key. |
 | `--local` | `false` | Use the local model profile (see below). |
 | `--json` | `false` | Emit a machine-readable JSON evidence envelope. |
+| `--summary` | `false` | Emit a concise Markdown summary; with `--json`, emits `slither.summary/v1`. When `--out` is omitted, defaults become `slither-summary.md` or `slither-summary.json`; an explicit `--out slither-report.md` is preserved. |
 | `--cull` | `false` | Append a cheap-model cull ledger over reported rows. |
 | `--no-cache` | `false` | Disable the content-hash score cache (always re-score). |
 
@@ -74,6 +82,12 @@ Generate a data-integrity lane inventory:
 
 ```bash
 go run ./cmd/slither report /path/to/repo --inventory data-integrity --json --out slither-data.json
+```
+
+Generate a compact handoff with ranking and scoring health:
+
+```bash
+go run ./cmd/slither report /path/to/repo --summary --json --out slither-summary.json
 ```
 
 Append an auditable cull ledger (kept targets, alternates, culled buckets,
@@ -112,7 +126,7 @@ env var `SLITHER_API_KEY` — unless you override each explicitly.
 
 ## Configuration file
 
-On first run `slither` writes `~/.config/slither/config.json` (on macOS:
+On first `report` run, `slither` writes `~/.config/slither/config.json` (on macOS:
 `~/Library/Application Support/slither/config.json`) with built-in defaults, then
 reads it on every run. It lets you set a default scoring model without passing
 flags or editing source:
@@ -141,6 +155,166 @@ flags or editing source:
   to disable. A missing or corrupt cache is ignored, never fatal. New cache and
   report files are owner-readable only (`0600`); replacing an existing file never
   broadens stricter permissions.
+
+## Agent bridge
+
+Run one JSON object per line through the offline, dependency-free stdio bridge:
+
+```bash
+printf '%s\n' '{"schema":"slither.agent/v1","id":"hello-1","op":"hello"}' |
+  go run ./cmd/slither agent /path/to/repo
+```
+
+`agent` does not load or create user configuration, call a model or network, or
+read/write the score cache. It uses embedded patterns and normal scan defaults.
+Requests are processed serially and retain at most one in-memory snapshot.
+
+Every request is a single JSON object with the `slither.agent/v1` schema,
+printable-ASCII `id` (1–128 bytes), and an operation. Unknown and unused fields
+are rejected. LF, CRLF, and a final record ending at EOF are accepted. The
+payload limit is 1 MiB (1,048,576 bytes), excluding its line ending. An oversized
+line is discarded through its newline and returns `request_too_large`, so the
+following request can proceed.
+
+```json
+{"schema":"slither.agent/v1","id":"request-1","op":"hello"}
+```
+
+Successful responses contain `schema`, `id`, `ok:true`, and `result`.
+Snapshot-backed successes also contain `report_id` and `source_state`. Error
+responses contain only the protocol envelope and a code, never paths, raw
+errors, provider output, source, or snippets:
+
+```json
+{"schema":"slither.agent/v1","id":"request-1","ok":false,"error":{"code":"invalid_request"}}
+```
+
+### Hello and operation fields
+
+`hello` accepts no operation fields. Its result has fixed values; the
+`schemas` and `operations` arrays have the following fixed ordering:
+
+```json
+{"protocol":"slither.agent/v1","schemas":["slither.report/v1","slither.context/v1","slither.outcome/v1","slither.eval/v1"],"operations":["hello","scan","query","context","feedback"],"max_request_bytes":1048576,"max_context_bytes":1048576,"feedback_enabled":false}
+```
+
+Pass `--outcomes <path>` to make `feedback_enabled` true. This authorizes
+only the named ledger file; its parent directory must already exist.
+
+| Operation | Allowed fields beyond `schema`, `id`, `op` | Result |
+| --- | --- | --- |
+| `hello` | none | Fixed protocol/schema/operation lists, both 1 MiB limits, and feedback state. |
+| `scan` | none | Forces a rebuild and returns report parameters, discovery, skipped signals, all eight cull counts, queues, and lanes. |
+| `query` | required `limit` (1–80); optional `target_ids`, `focus` | Bounded summaries with `count` and `truncated`; IDs and regexp focus form a deduplicated union in report-row order. |
+| `context` | required `budget_bytes`; optional `target_ids`, `focus` | A redacted, byte-bounded `slither.context/v1` packet. Maximum budget: 1 MiB. |
+| `feedback` | required `report_id`, `evidence_id`, `verdict`, `files_opened`, `tool_calls`, `review_ms` | A derived outcome record; success is `{"recorded":true}`. |
+
+Logical target IDs have exactly the form `slither:file:<base64>`, where
+`<base64>` is unpadded URL-safe base64 for the slash-separated relative path.
+For example, `auth.go` is `slither:file:YXV0aC5nbw`. Report and evidence IDs
+are lowercase `sha256:` identities.
+
+`query` summaries include rank, logical/evidence IDs, path, score provenance,
+class, confidence, actionability, caveat, cull disposition, verification command,
+and at most eight evidence layers and reasons. They never include source,
+excerpts, snippets, or model prose. `context` retains its selection, redaction,
+proof-obligation, omission, ordering, containment, and source-read contracts.
+
+Filesystem-discovered repositories rebuild before every non-`hello` operation;
+`scan` always rebuilds. A clean Git snapshot is reused only while `HEAD` and
+clean status are unchanged. Dirty/untracked state fingerprints status plus each
+regular file's bounded inspected prefix, while Git metadata failure forces a
+rebuild. A failed refresh clears the prior snapshot rather than treating it as
+current.
+
+Stable errors are `invalid_request`, `unsupported_schema`, `unsupported_op`,
+`request_too_large`, `budget_too_small`, `budget_too_large`,
+`target_not_found`, `stale_evidence`, `feedback_disabled`,
+`feedback_write_failed`, `scan_failed`, and `canceled`.
+
+## Outcome ledger
+
+Feedback is opt-in: without `--outcomes`, it returns `feedback_disabled`.
+Slither validates supplied report and evidence IDs against the active snapshot,
+then derives rank, score, and lane rather than accepting client classification.
+`verdict` is `confirmed`, `refuted`, `unknown`, or `skipped`; the three
+counters are non-negative integers.
+
+The JSONL record is `slither.outcome/v1` and contains only these typed fields:
+
+```json
+{"schema":"slither.outcome/v1","timestamp":"2024-01-02T03:04:05Z","report_id":"sha256:…","evidence_id":"sha256:…","lane":"kept_for_premium","rank":1,"score":4,"verdict":"confirmed","files_opened":2,"tool_calls":3,"review_ms":125}
+```
+
+It intentionally stores no repository path, file path, source, snippet, prompt,
+command, or arbitrary feedback prose. Encoded JSON plus newline must not exceed
+1 MiB. A ledger is a path-bound append-only regular file: a new file is created
+`0600`; an existing file must already be owner-readable and owner-writable with
+no group/other bits. Symlinks, directories, devices, sockets, and replacements
+after startup are rejected. Each append rechecks the parent and target, writes
+one JSON object plus newline, syncs, and closes.
+
+## Evaluation
+
+Evaluate one or more report JSON files against the ledger:
+
+```bash
+go run ./cmd/slither eval \
+  --outcomes ./slither-outcomes.jsonl \
+  --report ./slither-report.json \
+  --report ./earlier-report.json \
+  --json --out -
+```
+
+`--outcomes` is required exactly once; one or more repeatable `--report` flags
+and exactly one of `--json` or `--markdown` are required; positional arguments are rejected. `--out` defaults
+to `-`; a file output is atomic and `0600`, and cannot alias the ledger or any
+report input. Evaluation does not load configuration, scan a repository, call a
+model or network, write a cache, or modify its inputs.
+
+Each report must be `slither.report/v1` with a valid identity, ordered unique
+evidence IDs, valid score provenance, and an identity that matches its contents.
+Duplicate report identities are rejected. Matched outcomes must revalidate to
+the report's one-based rank, score, and derived cull lane.
+
+The ledger streams in order with a 1 MiB per-record cap; blank lines are ignored.
+Malformed or oversized interior records are fatal. Exactly one incomplete final
+JSON record without a newline is ignored and increments
+`warnings.partial_trailing_records`; a complete but invalid final record is
+fatal. Complete records outside the supplied report/evidence set are excluded
+and increment `warnings.unmatched_outcomes`.
+
+The deterministic `slither.eval/v1` result has report/row counts, matched
+outcome and context-cost totals, calibration, and warning counts. It contains no
+timestamps, repository paths, report IDs, or input paths.
+
+### Evaluation formulas
+
+`top_k` is fixed at 15. `confirmed` and `refuted` are labels; `unknown`
+and `skipped` contribute to outcome and context-cost totals but not labels. Only
+matched, integrity-valid records contribute to matched totals.
+
+Let `slots = sum(min(15, rows in each report))`. Let `confirmed_total` be
+matched confirmed outcomes plus unmatched confirmed outcomes.
+
+| Field | Exact value |
+| --- | --- |
+| `found` | Matched labeled (`confirmed` or `refuted`) outcomes. |
+| `missing` | Unmatched labeled outcomes. |
+| `noise_in_top_k` | Matched refuted outcomes with revalidated `rank <= 15`. |
+| `confirmed_in_top_k` | Matched confirmed outcomes with revalidated `rank <= 15`. |
+| `distinct_scores_in_top_k` | Distinct scores among each report's first 15 rows, summed per report. |
+| `noise_top_k_rate` | `noise_in_top_k / slots`. |
+| `confirmed_top_k_recall` | `confirmed_in_top_k / confirmed_total`. |
+| `confirmed_found_recall` | Matched confirmed outcomes / `confirmed_total`. |
+| `labeled_coverage` | `found / labeled`. |
+| `top_k_score_saturation` | `1 - (distinct_scores_in_top_k / slots)`. |
+
+Every ratio with a zero denominator is `0`; therefore
+`top_k_score_saturation` is `1` when `slots` is zero. Unchanged inputs render
+byte-identical JSON plus one newline. `--markdown` renders the same totals,
+formula `slots` denominator, context cost, Top-K health, recall/coverage, and ledger warnings
+without paths, IDs, timestamps, or input names.
 
 ## Output
 
@@ -172,9 +346,11 @@ Each evidence row carries an `actionability` value in Markdown and JSON:
 | `hotspot` | Review when you care about blast radius, churn, centrality, ownership, or code smell. Hotspot rows are prioritization evidence, not bug claims. |
 | `verify_first` | Check context before spending premium review. This covers generated/docs/test-only rows, detector fixtures, weak lexical evidence, model errors, and low-signal rows. |
 
-`actionability` is deterministic and derived from the row evidence. It is
-separate from `cull_decision`: culling decides which bucket a row belongs in;
-actionability describes how a reviewer should treat that row inside any bucket.
+`actionability` is deterministic and derived from the row evidence. When
+`--cull` is enabled, kept and alternate rows retain that intrinsic value, while
+culled rows render as `verify_first`; the explicit `cull_decision` remains
+available for bucket filtering. Summary actionability counts use the same
+rendered view as the full report.
 Candidate verification commands use POSIX-shell quoting for repository-controlled
 arguments. When a path contains a carriage return or newline, Slither omits any
 candidate command that would need to embed that path because no portable, exact

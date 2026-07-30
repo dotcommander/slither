@@ -183,7 +183,7 @@ func TestRunGitOutputLimitReportsCapAndCommandErrors(t *testing.T) {
 	if _, err := runGitOutputLimit(context.Background(), repo, 4, "ls-files"); !errors.Is(err, errGitOutputLimit) {
 		t.Fatalf("cap error = %v, want errGitOutputLimit", err)
 	}
-	if _, skip := churnByFile(context.Background(), filepath.Join(repo, "missing"), 90); skip != "command_failed" {
+	if _, skip := churnByFile(context.Background(), filepath.Join(repo, "missing"), gitHistoryWindow(90, currentTime())); skip != "command_failed" {
 		t.Fatalf("history skip = %q, want surfaced command failure", skip)
 	}
 }
@@ -206,7 +206,7 @@ func TestStaleMarkersSurfacePartialBlameFailure(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, out)
 	}
-	stale, skip := staleMarkersByFile(context.Background(), repo, []string{tracked, untracked}, 1000)
+	stale, skip := staleMarkersByFile(context.Background(), repo, []string{tracked, untracked}, 1000, currentTime())
 	if stale["tracked.go"].StaleCount != 1 {
 		t.Fatalf("stale evidence = %#v, want tracked marker", stale)
 	}

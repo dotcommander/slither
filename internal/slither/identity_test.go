@@ -31,6 +31,17 @@ func TestReportParametersNormalizeFilterOrder(t *testing.T) {
 	}
 }
 
+func TestReportParametersStripBaseURLUserinfo(t *testing.T) {
+	t.Parallel()
+	parameters := normalizedReportParameters(Options{
+		Model:   "model",
+		BaseURL: "https://user:private-password@example.test/v1",
+	}, "sha256:patterns")
+	if parameters.BaseURL != "https://example.test/v1" {
+		t.Fatalf("base URL = %q, want userinfo-free endpoint", parameters.BaseURL)
+	}
+}
+
 func TestReportParametersPreserveFallbackModelOrderAndMultiplicity(t *testing.T) {
 	base := Options{Days: 1, MaxBytes: 2, Top: 3, Model: "model", BaseURL: "https://example.test/v1", FallbackModels: []string{"a", "b", "a"}}
 	first := normalizedReportParameters(base, "sha256:patterns")

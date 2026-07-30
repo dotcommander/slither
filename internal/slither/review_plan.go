@@ -709,8 +709,8 @@ func repoFileExists(repo, rel string) bool {
 	if repo == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(repo, rel))
-	return err == nil
+	info, err := os.Lstat(filepath.Join(repo, rel))
+	return err == nil && info.Mode().IsRegular()
 }
 
 func composerHasScript(repo, name string) bool {
@@ -846,10 +846,10 @@ func preferredPackageScript(scripts map[string]string) string {
 }
 
 func packageUsesBun(absDir string) bool {
-	if _, err := os.Stat(filepath.Join(absDir, "bun.lock")); err == nil {
+	if info, err := os.Lstat(filepath.Join(absDir, "bun.lock")); err == nil && info.Mode().IsRegular() {
 		return true
 	}
-	if _, err := os.Stat(filepath.Join(absDir, "bun.lockb")); err == nil {
+	if info, err := os.Lstat(filepath.Join(absDir, "bun.lockb")); err == nil && info.Mode().IsRegular() {
 		return true
 	}
 	return false

@@ -60,6 +60,13 @@ func NewModelScorer(opts Options) (*ModelScorer, error) {
 	return scorer, nil
 }
 
+func (s *ModelScorer) Close() error {
+	if s == nil || s.wh == nil {
+		return nil
+	}
+	return s.wh.Close()
+}
+
 func modelAPIKey(opts Options) string {
 	if opts.APIKeyEnv == "" {
 		return ""
@@ -131,7 +138,7 @@ func (s *ModelScorer) ScoreBatch(ctx context.Context, batch []FileEvidence) ([]F
 // prose so downstream consumers can distinguish evidence from interpretation.
 func appendModelReasons(reasons, modelReasons []string) []string {
 	for _, reason := range modelReasons {
-		reason = strings.TrimSpace(reason)
+		reason = scrubOutputSecrets(strings.TrimSpace(reason))
 		if reason == "" {
 			continue
 		}
@@ -150,7 +157,7 @@ func appendModelReasons(reasons, modelReasons []string) []string {
 // append a model_error reason, then recompute evidence layers from reasons.
 func degradeBatch(out []FileEvidence, err error) {
 	for i := range out {
-		degradeEvidence(&out[i], "model_error:"+err.Error())
+		degradeEvidence(&out[i], "model_error:"+scrubOutputSecrets(err.Error()))
 	}
 }
 
@@ -168,7 +175,7 @@ func applyModelScore(row *FileEvidence, score int, summary string, reasons []str
 	row.ScoreProvenance.Model = &modelScore
 	row.ScoreProvenance.SelectedBy = "model"
 	if summary != "" {
-		row.Summary = summary
+		row.Summary = scrubOutputSecrets(summary)
 	}
 	row.Reasons = appendModelReasons(row.Reasons, reasons)
 	row.EvidenceLayers = mergeLayers(row.EvidenceLayers, []string{"model"})

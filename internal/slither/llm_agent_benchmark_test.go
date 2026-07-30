@@ -2,6 +2,7 @@ package slither
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -40,5 +41,24 @@ func BenchmarkBuildReportSourceReads(b *testing.B) {
 }
 
 func BenchmarkContextPacketSourceReads(b *testing.B) {
-	b.Skip("Phase C: BuildContextPacket source-read gate is not implemented")
+	repo := b.TempDir()
+	path := filepath.Join(repo, "target.go")
+	if err := os.WriteFile(path, []byte("package fixture\nfunc Target() {}\n"), 0o600); err != nil {
+		b.Fatal(err)
+	}
+	report := contextTestReport(repo, "target.go")
+	previous := contextDescriptorReader
+	var reads atomic.Int64
+	contextDescriptorReader = func(reader io.Reader, maxBytes int64) (string, bool, bool, error) {
+		reads.Add(1)
+		return previous(reader, maxBytes)
+	}
+	b.Cleanup(func() { contextDescriptorReader = previous })
+	b.ResetTimer()
+	for range b.N {
+		if _, err := BuildContextPacket(context.Background(), report, ContextPacketRequest{TargetIDs: []string{report.Rows[0].ID}, BudgetBytes: 2048}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(reads.Load())/float64(b.N), "selected_source_reads/op")
 }

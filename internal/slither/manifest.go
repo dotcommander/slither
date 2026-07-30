@@ -16,7 +16,18 @@ func readRepoManifest(repo, rel string) ([]byte, bool) {
 		return nil, false
 	}
 
-	file, err := os.Open(filepath.Join(repo, filepath.FromSlash(rel)))
+	root, err := os.OpenRoot(repo)
+	if err != nil {
+		return nil, false
+	}
+	defer root.Close()
+
+	name := filepath.FromSlash(rel)
+	info, err := root.Lstat(name)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, false
+	}
+	file, err := root.Open(name)
 	if err != nil {
 		return nil, false
 	}

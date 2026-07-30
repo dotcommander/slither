@@ -3036,7 +3036,7 @@ func TestChurnByFileSignalsNoHistory(t *testing.T) {
 	runGitForTest(t, tmp, "config", "user.email", "test@example.com")
 	runGitForTest(t, tmp, "config", "user.name", "Test")
 
-	churn, skip := churnByFile(context.Background(), tmp, 30)
+	churn, skip := churnByFile(context.Background(), tmp, gitHistoryWindow(30, currentTime()))
 	if skip == "" {
 		t.Fatalf("expected non-empty skip reason for repo with no commits, got empty")
 	}

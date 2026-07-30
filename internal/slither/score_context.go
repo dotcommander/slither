@@ -27,45 +27,57 @@ type scoreContext struct {
 	ownership     map[string]ownershipInfo
 	staleMarkers  map[string]staleMarkerInfo
 	incomingRefs  map[string]int
+	localImports  []localImportEdge
 	documentedEnv map[string]bool
 	patterns      scoringPatterns
 	skipped       []string
 }
 
-func newScoreContext(ctx context.Context, repo string, files []string, maxBytes int64, days int, patterns scoringPatterns) scoreContext {
+func newScoreContext(ctx context.Context, repo string, files []string, maxBytes int64, days int, asOf time.Time, patterns scoringPatterns) scoreContext {
+	incomingRefs, localImports := localImportGraph(repo, files, maxBytes)
 	scoreCtx := scoreContext{
 		files:         files,
 		fixTouches:    map[string]int{},
-		incomingRefs:  localImportCounts(repo, files, maxBytes),
+		incomingRefs:  incomingRefs,
+		localImports:  localImports,
 		documentedEnv: documentedEnvVars(repo, files, maxBytes),
 		patterns:      patterns,
 	}
-	churn, skip := churnByFile(ctx, repo, days)
+	historyWindow := gitHistoryWindow(days, asOf)
+	churn, skip := churnByFile(ctx, repo, historyWindow)
 	scoreCtx.churn = churn
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "churn:"+skip)
 	}
-	fixTouches, skip := bugfixTouchesByFile(ctx, repo, days)
+	fixTouches, skip := bugfixTouchesByFile(ctx, repo, historyWindow)
 	scoreCtx.fixTouches = fixTouches
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "bugfix_density:"+skip)
 	}
-	cochange, skip := cochangeByFile(ctx, repo, days)
+	cochange, skip := cochangeByFile(ctx, repo, historyWindow)
 	scoreCtx.cochange = cochange
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "cochange:"+skip)
 	}
-	ownership, skip := ownershipByFile(ctx, repo, days)
+	ownership, skip := ownershipByFile(ctx, repo, historyWindow)
 	scoreCtx.ownership = ownership
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "ownership:"+skip)
 	}
-	staleMarkers, skip := staleMarkersByFile(ctx, repo, files, maxBytes)
+	staleMarkers, skip := staleMarkersByFile(ctx, repo, files, maxBytes, asOf)
 	scoreCtx.staleMarkers = staleMarkers
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "stale_markers:"+skip)
 	}
 	return scoreCtx
+}
+
+// localImportEdge retains the already-resolved local edge used for centrality.
+// It is report-internal context only: scoring continues to consume incomingRefs.
+type localImportEdge struct {
+	Importer string
+	Imported string
+	Kind     string
 }
 
 type cochangeInfo struct {
@@ -84,8 +96,26 @@ type staleMarkerInfo struct {
 	OldestDays int
 }
 
-func churnByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
-	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--numstat", "--format=")
+type gitHistoryBounds struct {
+	Since string
+	Until string
+}
+
+func gitHistoryWindow(days int, asOf time.Time) gitHistoryBounds {
+	asOf = asOf.UTC()
+	return gitHistoryBounds{
+		Since: asOf.AddDate(0, 0, -days).Format(time.RFC3339),
+		Until: asOf.Format(time.RFC3339),
+	}
+}
+
+func (bounds gitHistoryBounds) args() []string {
+	return []string{"--since=" + bounds.Since, "--until=" + bounds.Until}
+}
+
+func churnByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]int, string) {
+	args := append(bounds.args(), "--numstat", "--format=")
+	out, err := runGitOutput(ctx, repo, append([]string{"log"}, args...)...)
 	if err != nil {
 		return map[string]int{}, gitSkipReason(err)
 	}
@@ -131,8 +161,9 @@ func numstatPath(field string) string {
 	return strings.ReplaceAll(result, "//", "/")
 }
 
-func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string]int, string) {
-	history, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--pretty=format:%H")
+func bugfixTouchesByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]int, string) {
+	historyArgs := append(bounds.args(), "--pretty=format:%H")
+	history, err := runGitOutput(ctx, repo, append([]string{"log"}, historyArgs...)...)
 	if err != nil {
 		return map[string]int{}, gitSkipReason(err)
 	}
@@ -143,7 +174,8 @@ func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string
 	if len(commits) < 30 {
 		return map[string]int{}, "insufficient commit count:" + itoa(len(commits))
 	}
-	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
+	bugfixArgs := append(bounds.args(), "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
+	out, err := runGitOutput(ctx, repo, append([]string{"log"}, bugfixArgs...)...)
 	if err != nil {
 		return map[string]int{}, gitSkipReason(err)
 	}
@@ -160,8 +192,9 @@ func bugfixTouchesByFile(ctx context.Context, repo string, days int) (map[string
 	return touches, ""
 }
 
-func ownershipByFile(ctx context.Context, repo string, days int) (map[string]ownershipInfo, string) {
-	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_AUTHOR__%ae", "--name-only")
+func ownershipByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]ownershipInfo, string) {
+	args := append(bounds.args(), "--format=format:__SLITHER_AUTHOR__%ae", "--name-only")
+	out, err := runGitOutput(ctx, repo, append([]string{"log"}, args...)...)
 	if err != nil {
 		return map[string]ownershipInfo{}, gitSkipReason(err)
 	}
@@ -207,8 +240,9 @@ func ownershipByFile(ctx context.Context, repo string, days int) (map[string]own
 	return ownership, ""
 }
 
-func cochangeByFile(ctx context.Context, repo string, days int) (map[string]cochangeInfo, string) {
-	out, err := runGitOutput(ctx, repo, "log", "--since="+itoa(days)+" days ago", "--format=format:__SLITHER_COMMIT__", "--name-only")
+func cochangeByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]cochangeInfo, string) {
+	args := append(bounds.args(), "--format=format:__SLITHER_COMMIT__", "--name-only")
+	out, err := runGitOutput(ctx, repo, append([]string{"log"}, args...)...)
 	if err != nil {
 		return map[string]cochangeInfo{}, gitSkipReason(err)
 	}
@@ -299,7 +333,7 @@ func uniqueIncludedFiles(files []string) []string {
 	return unique
 }
 
-func staleMarkersByFile(ctx context.Context, repo string, files []string, maxBytes int64) (map[string]staleMarkerInfo, string) {
+func staleMarkersByFile(ctx context.Context, repo string, files []string, maxBytes int64, asOf time.Time) (map[string]staleMarkerInfo, string) {
 	markers := [][2]string{}
 	for _, path := range files {
 		if len(markers) >= 200 {
@@ -326,7 +360,7 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	if len(markers) == 0 {
 		return map[string]staleMarkerInfo{}, ""
 	}
-	today := currentTime()
+	today := asOf
 	stale := map[string]staleMarkerInfo{}
 	blameFailures := 0
 	blameFailureReason := ""
@@ -374,7 +408,7 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	return stale, ""
 }
 
-func localImportCounts(repo string, files []string, maxBytes int64) map[string]int {
+func localImportGraph(repo string, files []string, maxBytes int64) (map[string]int, []localImportEdge) {
 	source := map[string]string{}
 	noExt := map[string]string{}
 	goPackageFiles := map[string][]string{}
@@ -408,30 +442,41 @@ func localImportCounts(repo string, files []string, maxBytes int64) map[string]i
 		counts[rel] = 0
 	}
 	modulePath := goModulePath(repo)
+	var edges []localImportEdge
 	for importer, path := range source {
 		text, ok, _ := readTextPrefix(path, maxBytes)
 		if !ok {
 			continue
 		}
-		resolved := map[string]bool{}
+		resolved := map[string]string{}
 		for _, match := range regexp.MustCompile(`\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)|\brequire\s*\(\s*["']([^"']+)["']\s*\)|(?m)^\s*import\s+["']([^"']+)["']|(?m)^\s*import\s+(?:\w+\s+|[._]\s+)?["']([^"']+)["']`).FindAllStringSubmatch(text, -1) {
 			spec := firstNonEmpty(match[1:])
 			if target := resolveLocalImport(importer, spec, counts, noExt); target != "" && target != importer {
-				resolved[target] = true
+				resolved[target] = "local_module"
 			}
 		}
 		for _, spec := range goImportSpecs(text) {
 			for _, target := range resolveGoImportPackage(importer, spec, modulePath, goPackageFiles) {
 				if target != importer {
-					resolved[target] = true
+					resolved[target] = "go_package"
 				}
 			}
 		}
-		for target := range resolved {
+		for target, kind := range resolved {
 			counts[target]++
+			edges = append(edges, localImportEdge{Importer: importer, Imported: target, Kind: kind})
 		}
 	}
-	return counts
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].Importer != edges[j].Importer {
+			return edges[i].Importer < edges[j].Importer
+		}
+		if edges[i].Imported != edges[j].Imported {
+			return edges[i].Imported < edges[j].Imported
+		}
+		return edges[i].Kind < edges[j].Kind
+	})
+	return counts, edges
 }
 
 func goModulePath(repo string) string {

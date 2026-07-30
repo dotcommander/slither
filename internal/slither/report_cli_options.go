@@ -1,0 +1,171 @@
+package slither
+
+import (
+	"errors"
+	"flag"
+	"io"
+	"path/filepath"
+	"strings"
+)
+
+func normalizeReportArgs(args []string) []string {
+	flagsWithValues := map[string]bool{
+		"-out": true, "--out": true,
+		"-top": true, "--top": true,
+		"-max-bytes": true, "--max-bytes": true,
+		"-days": true, "--days": true,
+		"-patterns": true, "--patterns": true,
+		"-focus": true, "--focus": true,
+		"-include": true, "--include": true,
+		"-exclude": true, "--exclude": true,
+		"-why-top": true, "--why-top": true,
+		"-inventory": true, "--inventory": true,
+		"-model": true, "--model": true,
+		"-base-url": true, "--base-url": true,
+		"-api-key-env": true, "--api-key-env": true,
+	}
+	var flags []string
+	var positionals []string
+	hadSeparator := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			hadSeparator = true
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := arg
+		if before, _, ok := strings.Cut(arg, "="); ok {
+			name = before
+		}
+		if flagsWithValues[name] && !strings.Contains(arg, "=") && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	if hadSeparator {
+		flags = append(flags, "--")
+	}
+	return append(flags, positionals...)
+}
+
+// resolveReportOptions builds Options by precedence: explicit CLI flag >
+// config-file value > built-in default. Config values are seeded as the flag
+// defaults, so an unset flag yields the config value and an empty Model keeps
+// the deterministic offline path.
+func resolveReportOptions(cfg Config, args []string) (Options, error) {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	opts := Options{Repo: ".", Out: defaultOut, Top: defaultTop, MaxBytes: defaultMaxBytes, Days: defaultDays, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv, FallbackModels: cfg.FallbackModels}
+	include := stringListFlag{}
+	exclude := stringListFlag{}
+	fs.StringVar(&opts.Out, "out", opts.Out, "Markdown report path, or - for stdout")
+	fs.IntVar(&opts.Top, "top", opts.Top, "ranked production files to include")
+	fs.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum bytes to inspect per file")
+	fs.IntVar(&opts.Days, "days", opts.Days, "history window in days for churn and bug-fix signals")
+	fs.StringVar(&opts.Patterns, "patterns", "", "JSON path/content pattern file")
+	fs.StringVar(&opts.Focus, "focus", "", "regexp matched against path, evidence layers, reasons, and summary")
+	fs.Var(&include, "include", "path glob to include; repeat or comma-separate")
+	fs.Var(&exclude, "exclude", "path glob to exclude; repeat or comma-separate")
+	fs.IntVar(&opts.WhyTop, "why-top", 0, "include concise explanations for the top N ranked files")
+	fs.StringVar(&opts.Inventory, "inventory", "", "group one canonical review-lane inventory")
+	fs.StringVar(&opts.Model, "model", opts.Model, "cheap model ID for wormhole scoring")
+	fs.StringVar(&opts.BaseURL, "base-url", opts.BaseURL, "OpenAI-compatible base URL")
+	fs.StringVar(&opts.APIKeyEnv, "api-key-env", opts.APIKeyEnv, "environment variable containing the API key")
+	fs.BoolVar(&opts.Local, "local", false, "use local OpenAI-compatible model profile")
+	fs.BoolVar(&opts.JSON, "json", false, "emit a machine-readable JSON evidence envelope")
+	fs.BoolVar(&opts.Summary, "summary", false, "emit a concise report summary instead of the full report")
+	fs.BoolVar(&opts.Cull, "cull", false, "append a cheap-model cull ledger over reported rows")
+	fs.BoolVar(&opts.NoCache, "no-cache", false, "disable the content-hash score cache")
+	if err := fs.Parse(normalizeReportArgs(args)); err != nil {
+		return Options{}, usageError("report", err)
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if fs.NArg() > 1 {
+		return Options{}, usageError("report", errors.New("report accepts at most one repo path"))
+	}
+	if fs.NArg() == 1 {
+		opts.Repo = fs.Arg(0)
+	}
+	opts.Include = include.Values()
+	opts.Exclude = exclude.Values()
+	if opts.Top <= 0 {
+		return Options{}, usageError("report", errors.New("--top must be positive"))
+	}
+	if opts.MaxBytes <= 0 {
+		return Options{}, usageError("report", errors.New("--max-bytes must be positive"))
+	}
+	if opts.Days <= 0 {
+		return Options{}, usageError("report", errors.New("--days must be positive"))
+	}
+	if opts.WhyTop < 0 {
+		return Options{}, usageError("report", errors.New("--why-top must be non-negative"))
+	}
+	if opts.Inventory != "" && !validReviewLane(opts.Inventory) {
+		return Options{}, usageError("report", errors.New("--inventory must name a canonical review lane"))
+	}
+	if _, err := compileFocus(opts.Focus); err != nil {
+		return Options{}, usageError("report", err)
+	}
+	if opts.Summary && !set["out"] {
+		if opts.JSON {
+			opts.Out = "slither-summary.json"
+		} else {
+			opts.Out = "slither-summary.md"
+		}
+	} else if opts.JSON && !set["out"] {
+		opts.Out = "slither-report.json"
+	}
+	if opts.Local {
+		// Config fallback IDs are provider-specific (OpenRouter) and do not apply
+		// to the local single-model server; clear them to avoid futile failover.
+		opts.FallbackModels = nil
+		if opts.Model == "" {
+			opts.Model = cfg.Local.Model
+		}
+		if !set["base-url"] {
+			opts.BaseURL = cfg.Local.BaseURL
+		}
+		if !set["api-key-env"] {
+			opts.APIKeyEnv = cfg.Local.APIKeyEnv
+		}
+	}
+	if set["base-url"] && !set["api-key-env"] {
+		profileBaseURL := cfg.BaseURL
+		if opts.Local {
+			profileBaseURL = cfg.Local.BaseURL
+		}
+		if opts.BaseURL != profileBaseURL {
+			opts.APIKeyEnv = ""
+		}
+	}
+	return opts, nil
+}
+
+type stringListFlag struct {
+	values []string
+}
+
+func (f *stringListFlag) String() string {
+	return strings.Join(f.values, ",")
+}
+
+func (f *stringListFlag) Set(value string) error {
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			f.values = append(f.values, filepath.ToSlash(part))
+		}
+	}
+	return nil
+}
+
+func (f *stringListFlag) Values() []string {
+	return append([]string(nil), f.values...)
+}

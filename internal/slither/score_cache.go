@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -71,9 +72,30 @@ func loadScoreCache() *scoreCache {
 		return c
 	}
 	if entries != nil {
+		for key, entry := range entries {
+			clean, changed := scrubCachedScore(entry)
+			if changed {
+				entries[key] = clean
+				c.dirty[key] = clean
+			}
+		}
 		c.entries = entries
 	}
 	return c
+}
+
+func scrubCachedScore(entry cachedScore) (cachedScore, bool) {
+	clean := entry
+	clean.Summary = scrubOutputSecrets(entry.Summary)
+	changed := clean.Summary != entry.Summary
+	if len(entry.ModelReasons) > 0 {
+		clean.ModelReasons = append([]string(nil), entry.ModelReasons...)
+		for i, reason := range clean.ModelReasons {
+			clean.ModelReasons[i] = scrubOutputSecrets(reason)
+			changed = changed || clean.ModelReasons[i] != reason
+		}
+	}
+	return clean, changed
 }
 
 func readScoreCacheFile(path string) ([]byte, error) {
@@ -115,29 +137,45 @@ func (c *scoreCache) markUsed(key string) {
 	c.used[key] = true
 }
 
-// prune drops cold entries when the cache exceeds maxCacheEntries, always
-// keeping every key used this run, then filling remaining capacity with
-// arbitrary other entries up to the cap. Returns true when it removed entries so
-// persist knows to rewrite even when no dirty writes occurred.
+// prune drops entries when the cache exceeds maxCacheEntries. It retains newly
+// written entries first, then cache hits, then cold entries, sorting each group
+// so an over-cap run produces deterministic bytes. When the current run itself
+// touches more than the cap, the cache remains bounded because it is only an
+// optimization; evicted rows are safely rescored on a later run. Returns true
+// when it removed entries so persist rewrites even without dirty writes.
 func (c *scoreCache) prune() bool {
 	if len(c.entries) <= maxCacheEntries {
 		return false
 	}
 	kept := make(map[string]cachedScore, maxCacheEntries)
+	keepKeys := func(keys []string) {
+		sort.Strings(keys)
+		for _, key := range keys {
+			if len(kept) >= maxCacheEntries {
+				return
+			}
+			if _, exists := kept[key]; exists {
+				continue
+			}
+			if cs, ok := c.entries[key]; ok {
+				kept[key] = cs
+			}
+		}
+	}
+	mapKeys := func(values map[string]cachedScore) []string {
+		keys := make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+		return keys
+	}
+	usedKeys := make([]string, 0, len(c.used))
 	for key := range c.used {
-		if cs, ok := c.entries[key]; ok {
-			kept[key] = cs
-		}
+		usedKeys = append(usedKeys, key)
 	}
-	for key, cs := range c.entries {
-		if len(kept) >= maxCacheEntries {
-			break
-		}
-		if _, ok := kept[key]; ok {
-			continue
-		}
-		kept[key] = cs
-	}
+	keepKeys(mapKeys(c.dirty))
+	keepKeys(usedKeys)
+	keepKeys(mapKeys(c.entries))
 	if len(kept) == len(c.entries) {
 		return false
 	}

@@ -1,17 +1,15 @@
-slither - a cheap-model scout that creeps through every path
+slither - bounded repository evidence and review packets
 
 Usage:
-  slither version [--build]
-  slither report [repo] [--out slither-report.md] [--top 80] [--max-bytes 500000] [--days 90]
-  slither report [repo] --focus "postgres|pgx|migration" --why-top 10
-  slither report [repo] --include "internal/**" --exclude "**/*_test.go"
-  slither report [repo] --json --out slither-report.json
-  slither report [repo] --cull --json --out slither-cull.json
-  slither report [repo] --patterns triage_patterns.json --json
-  slither report [repo] --model z-ai/glm-5.2 --base-url https://openrouter.ai/api/v1
-  slither report [repo] --local
+  slither <command> [flags]
 
-Model scoring:
-  Slither uses github.com/garyblankenship/wormhole for model calls, matching distill.
-  If --model is omitted, slither uses deterministic fallback scoring.
-  --local selects Qwen3.6-35B-A3B-oQ4-fp16-mtp at http://127.0.0.1:8000/v1 unless overridden.
+Commands:
+  version      print build provenance
+  doctor       read-only configuration and local model readiness
+  outputs      choose a report, protocol, or ledger output
+  completion   generate dependency-free shell completion
+  report       scan a repository into a ranked evidence report
+  agent        run the bounded JSONL agent bridge
+  eval         evaluate outcome-ledger labels against reports
+
+Run slither help <command> or slither <command> --help for flags, limits, examples, and output behavior.

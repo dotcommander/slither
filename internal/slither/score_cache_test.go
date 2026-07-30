@@ -8,13 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
 func TestScoreCacheKeyStableAndSensitive(t *testing.T) {
 	t.Parallel()
 	a := baseEvidence("x.go", 2)
-	if scoreCacheKey("m", "", nil, a) != scoreCacheKey("m", "", nil, a) {
+	first := scoreCacheKey("m", "", nil, a)
+	second := scoreCacheKey("m", "", nil, a)
+	if first != second {
 		t.Fatal("key not stable for identical inputs")
 	}
 	if scoreCacheKey("m1", "", nil, a) == scoreCacheKey("m2", "", nil, a) {
@@ -168,6 +171,56 @@ func TestLoadScoreCacheCorruptIgnored(t *testing.T) {
 	}
 }
 
+func TestLoadScoreCacheScrubsAndRewritesLegacySecrets(t *testing.T) {
+	dir := setTempConfigDir(t) // NOT parallel
+	path := filepath.Join(dir, "slither", "cache", "scores.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[string]cachedScore{
+		"legacy": {
+			Score:        4,
+			Summary:      "retry https://user:pass@example.test/v1",
+			ModelReasons: []string{"Bearer abcdefghijklmnopqrstuvwxyz"},
+		},
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := loadScoreCache()
+	entry := cache.entries["legacy"]
+	if entry.Summary != "retry https://example.test/v1" {
+		t.Fatalf("scrubbed summary = %q", entry.Summary)
+	}
+	if !reflect.DeepEqual(entry.ModelReasons, []string{"Bearer [redacted]"}) {
+		t.Fatalf("scrubbed model reasons = %#v", entry.ModelReasons)
+	}
+	if len(cache.dirty) != 1 {
+		t.Fatalf("dirty entries = %d, want forced rewrite", len(cache.dirty))
+	}
+	if err := cache.persist(); err != nil {
+		t.Fatalf("persist scrubbed cache: %v", err)
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(persisted)
+	for _, secret := range []string{"user:pass", "abcdefghijklmnopqrstuvwxyz"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("persisted cache retained secret %q", secret)
+		}
+	}
+	if !strings.Contains(text, "https://example.test/v1") || !strings.Contains(text, "[redacted]") {
+		t.Fatalf("persisted scrubbed cache = %s", text)
+	}
+}
+
 func TestLoadScoreCacheOversizedIgnored(t *testing.T) {
 	dir := setTempConfigDir(t) // NOT parallel
 	path := filepath.Join(dir, "slither", "cache", "scores.json")
@@ -225,6 +278,28 @@ func TestScoreCacheUnderCapNotPruned(t *testing.T) {
 	}
 	if len(c.entries) != 1 {
 		t.Fatalf("entries = %d, want 1 (untouched)", len(c.entries))
+	}
+}
+
+func TestScoreCachePrunesWhenUsedExceedsCap(t *testing.T) {
+	t.Parallel()
+	c := &scoreCache{entries: map[string]cachedScore{}, dirty: map[string]cachedScore{}, used: map[string]bool{}}
+	for i := 0; i < maxCacheEntries+10; i++ {
+		key := fmt.Sprintf("k%05d", i)
+		c.entries[key] = cachedScore{Score: 3}
+		c.used[key] = true
+	}
+	if !c.prune() {
+		t.Fatal("prune should report a change when used entries exceed the cap")
+	}
+	if len(c.entries) != maxCacheEntries {
+		t.Fatalf("entries = %d, want cap %d", len(c.entries), maxCacheEntries)
+	}
+	if _, ok := c.entries["k00000"]; !ok {
+		t.Fatal("deterministic used-key prefix was not retained")
+	}
+	if _, ok := c.entries[fmt.Sprintf("k%05d", maxCacheEntries+9)]; ok {
+		t.Fatal("used key beyond the deterministic cap was retained")
 	}
 }
 
