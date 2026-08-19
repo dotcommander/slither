@@ -1,6 +1,6 @@
 module github.com/dotcommander/slither
 
-go 1.25
+go 1.25.0
 
 require github.com/garyblankenship/wormhole/v3 v3.0.1
 
