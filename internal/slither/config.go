@@ -3,10 +3,13 @@ package slither
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 )
+
+const maxConfigBytes = 10 << 20
 
 // userConfigDir is the seam tests override to redirect the slither config
 // directory. Production resolves os.UserConfigDir(); on darwin that is
@@ -63,7 +66,7 @@ func LoadOrCreateConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readConfig(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := defaultConfig()
@@ -79,6 +82,23 @@ func LoadOrCreateConfig() (Config, error) {
 		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+func readConfig(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxConfigBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxConfigBytes {
+		return nil, fmt.Errorf("config exceeds 10 MiB limit")
+	}
+	return data, nil
 }
 
 func writeConfig(path string, cfg Config) error {

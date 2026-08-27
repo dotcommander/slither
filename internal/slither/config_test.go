@@ -72,6 +72,48 @@ func TestLoadOrCreateConfigLoadsExistingFile(t *testing.T) {
 	}
 }
 
+func TestConfigReadersRejectOversizedFileWithoutRewriting(t *testing.T) {
+	dir := setTempConfigDir(t)
+	path := filepath.Join(dir, "slither", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := []byte(`{"model":"keep"}`)
+	if err := os.WriteFile(path, wantPrefix, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, maxConfigBytes+1); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadOrCreateConfig(); err == nil || !strings.Contains(err.Error(), "config exceeds 10 MiB limit") {
+		t.Fatalf("LoadOrCreateConfig error = %v, want oversized-config error", err)
+	}
+	if _, _, err := loadConfigReadOnly(); err == nil || !strings.Contains(err.Error(), "config exceeds 10 MiB limit") {
+		t.Fatalf("loadConfigReadOnly error = %v, want oversized-config error", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != maxConfigBytes+1 {
+		t.Fatalf("config size = %d, want unchanged %d", info.Size(), maxConfigBytes+1)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	gotPrefix := make([]byte, len(wantPrefix))
+	if _, err := file.Read(gotPrefix); err != nil {
+		t.Fatal(err)
+	}
+	if string(gotPrefix) != string(wantPrefix) {
+		t.Fatalf("config prefix = %q, want unchanged %q", gotPrefix, wantPrefix)
+	}
+}
+
 func TestWriteConfigReplacesExistingFileAtomically(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

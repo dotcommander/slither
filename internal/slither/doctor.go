@@ -107,7 +107,7 @@ func loadConfigReadOnly() (Config, string, error) {
 	if err != nil {
 		return Config{}, "", fmt.Errorf("resolve config: %w", err)
 	}
-	data, err := os.ReadFile(configPath)
+	data, err := readConfig(configPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return defaultConfig(), "missing", nil
 	}
