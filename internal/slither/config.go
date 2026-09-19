@@ -23,6 +23,7 @@ type Config struct {
 	BaseURL        string       `json:"base_url"`
 	APIKeyEnv      string       `json:"api_key_env"`
 	Local          LocalProfile `json:"local"`
+	Jev            JevProfile   `json:"jev"`
 	FallbackModels []string     `json:"fallback_models"`
 }
 
@@ -33,8 +34,16 @@ type LocalProfile struct {
 	APIKeyEnv string `json:"api_key_env"`
 }
 
+// JevProfile is the --jev Jev (TypeSafe SystemOne) typed-verdict profile.
+type JevProfile struct {
+	Model     string `json:"model"`
+	BaseURL   string `json:"base_url"`
+	APIKeyEnv string `json:"api_key_env"`
+}
+
 // defaultConfig is the built-in seed written on first run. Model is empty so
-// the deterministic offline fallback remains the default scoring path.
+// the deterministic offline fallback remains the default scoring path; the jev
+// profile's empty Model mirrors that precedent for the --jev path.
 func defaultConfig() Config {
 	return Config{
 		Model:     "",
@@ -44,6 +53,11 @@ func defaultConfig() Config {
 			Model:     "Qwen3.6-35B-A3B-oQ4-fp16-mtp",
 			BaseURL:   "http://127.0.0.1:8000/v1",
 			APIKeyEnv: "SLITHER_API_KEY",
+		},
+		Jev: JevProfile{
+			Model:     "",
+			BaseURL:   "https://api.typesafe.ai/v1/systemone",
+			APIKeyEnv: "TYPESAFE_API_KEY",
 		},
 		FallbackModels: []string{},
 	}

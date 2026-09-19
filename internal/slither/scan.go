@@ -74,7 +74,7 @@ func buildReport(ctx context.Context, opts Options, inspectWorkers int) (result 
 	}
 	scoreCtx := newScoreContext(ctx, opts.Repo, paths, opts.MaxBytes, opts.Days, asOf, patterns)
 	skippedSignals = append(skippedSignals, scoreCtx.skipped...)
-	scorer, err := NewModelScorer(opts)
+	scorer, err := newEvidenceScorer(opts)
 	if err != nil {
 		return Report{}, err
 	}

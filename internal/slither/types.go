@@ -19,6 +19,7 @@ type Options struct {
 	BaseURL        string
 	APIKeyEnv      string
 	Local          bool
+	Jev            bool
 	JSON           bool
 	Summary        bool
 	Cull           bool

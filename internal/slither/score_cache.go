@@ -264,18 +264,19 @@ func cacheableResult(e FileEvidence) bool {
 // goroutines in scoreTopRows never touch the cache, so no map is shared across
 // goroutines. Keys are derived from the deterministic state before scoring, so a
 // future run reproduces the same key. Misses keep their original positions.
-func scoreTopRowsCached(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, cache *scoreCache) (hits, misses int, err error) {
+func scoreTopRowsCached(ctx context.Context, scorer evidenceScorer, rows []FileEvidence, cache *scoreCache) (hits, misses int, err error) {
 	if scorer == nil || cache == nil || len(rows) == 0 {
 		return 0, 0, ctx.Err()
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, 0, err
 	}
+	model, baseURL, fallbackModels, contract := scorer.cacheKeyInputs()
 	keys := make([]string, len(rows))
 	var missIdx []int
 	var missRows []FileEvidence
 	for i := range rows {
-		keys[i] = scoreCacheKey(scorer.model, scorer.baseURL, scorer.fallbackModels, rows[i])
+		keys[i] = scoreCacheKeyWithPromptContract(model, baseURL, fallbackModels, contract, rows[i])
 		if cs, ok := cache.lookup(keys[i]); ok {
 			applyCachedScore(&rows[i], cs)
 			hits++

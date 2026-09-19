@@ -17,7 +17,7 @@ const (
 // concurrent writes never overlap and output order is preserved without a lock.
 // Provider-failed batches degrade only their own files to deterministic +
 // model_error (handled inside ScoreBatch); caller cancellation aborts the scan.
-func scoreTopRows(ctx context.Context, scorer *ModelScorer, rows []FileEvidence, batchSize, concurrency int) error {
+func scoreTopRows(ctx context.Context, scorer evidenceScorer, rows []FileEvidence, batchSize, concurrency int) error {
 	if scorer == nil || len(rows) == 0 {
 		return ctx.Err()
 	}

@@ -67,6 +67,12 @@ func (s *ModelScorer) Close() error {
 	return s.wh.Close()
 }
 
+// cacheKeyInputs exposes the inputs that determine this scorer's scores so the
+// score cache keys both scoring backends uniformly.
+func (s *ModelScorer) cacheKeyInputs() (string, string, []string, string) {
+	return s.model, s.baseURL, s.fallbackModels, batchScoringPromptTemplate
+}
+
 func modelAPIKey(opts Options) string {
 	if opts.APIKeyEnv == "" {
 		return ""

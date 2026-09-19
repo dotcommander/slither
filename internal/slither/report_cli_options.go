@@ -78,6 +78,7 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	fs.StringVar(&opts.BaseURL, "base-url", opts.BaseURL, "OpenAI-compatible base URL")
 	fs.StringVar(&opts.APIKeyEnv, "api-key-env", opts.APIKeyEnv, "environment variable containing the API key")
 	fs.BoolVar(&opts.Local, "local", false, "use local OpenAI-compatible model profile")
+	fs.BoolVar(&opts.Jev, "jev", false, "score the top band through a Jev (TypeSafe SystemOne) verdict endpoint")
 	fs.BoolVar(&opts.JSON, "json", false, "emit a machine-readable JSON evidence envelope")
 	fs.BoolVar(&opts.Summary, "summary", false, "emit a concise report summary instead of the full report")
 	fs.BoolVar(&opts.Cull, "cull", false, "append a cheap-model cull ledger over reported rows")
@@ -87,6 +88,9 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if opts.Local && opts.Jev {
+		return Options{}, usageError("report", errors.New("--jev and --local are mutually exclusive"))
+	}
 	if fs.NArg() > 1 {
 		return Options{}, usageError("report", errors.New("report accepts at most one repo path"))
 	}
@@ -136,10 +140,27 @@ func resolveReportOptions(cfg Config, args []string) (Options, error) {
 			opts.APIKeyEnv = cfg.Local.APIKeyEnv
 		}
 	}
+	if opts.Jev {
+		// Jev is a single-model typed-verdict endpoint; OpenRouter failover IDs
+		// do not apply, mirroring --local.
+		opts.FallbackModels = nil
+		if opts.Model == "" {
+			opts.Model = cfg.Jev.Model
+		}
+		if !set["base-url"] {
+			opts.BaseURL = cfg.Jev.BaseURL
+		}
+		if !set["api-key-env"] {
+			opts.APIKeyEnv = cfg.Jev.APIKeyEnv
+		}
+	}
 	if set["base-url"] && !set["api-key-env"] {
 		profileBaseURL := cfg.BaseURL
 		if opts.Local {
 			profileBaseURL = cfg.Local.BaseURL
+		}
+		if opts.Jev {
+			profileBaseURL = cfg.Jev.BaseURL
 		}
 		if opts.BaseURL != profileBaseURL {
 			opts.APIKeyEnv = ""

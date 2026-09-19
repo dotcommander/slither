@@ -61,6 +61,16 @@ Use a local OpenAI-compatible server:
 go run ./cmd/slither report /path/to/repo --local --out slither-report.md
 ```
 
+Score the top band through a Jev (TypeSafe SystemOne) verdict endpoint:
+
+```bash
+TYPESAFE_API_KEY=... go run ./cmd/slither report /path/to/repo --jev \
+  --out slither-report.md
+```
+
+`--jev` uses the `jev` profile from the slither config (`model`, `base_url`,
+`api_key_env`); an empty `model` keeps deterministic scoring.
+
 The embedded `premium-model-triage` catalog is the default. Use `--patterns`
 only to test or deliberately override it.
 

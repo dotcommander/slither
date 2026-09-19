@@ -1,6 +1,7 @@
 package slither
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -328,5 +329,88 @@ func TestResolveReportOptionsNoCacheFlag(t *testing.T) {
 	}
 	if !opts.NoCache {
 		t.Fatal("--no-cache did not set opts.NoCache")
+	}
+}
+
+func TestDefaultConfigSeedsJevProfile(t *testing.T) {
+	t.Parallel()
+	want := JevProfile{Model: "", BaseURL: "https://api.typesafe.ai/v1/systemone", APIKeyEnv: "TYPESAFE_API_KEY"}
+	if got := defaultConfig().Jev; got != want {
+		t.Fatalf("jev profile = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadOrCreateConfigFirstRunSeedsJevProfile(t *testing.T) {
+	setTempConfigDir(t) // NOT parallel: mutates userConfigDir seam
+	cfg, err := LoadOrCreateConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Jev != defaultConfig().Jev {
+		t.Fatalf("jev profile = %#v, want built-in seed %#v", cfg.Jev, defaultConfig().Jev)
+	}
+}
+
+func TestResolveReportOptionsJevUsesConfigProfile(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	opts, err := resolveReportOptions(cfg, []string{"--jev", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Jev {
+		t.Fatal("--jev did not set opts.Jev")
+	}
+	if opts.BaseURL != cfg.Jev.BaseURL {
+		t.Fatalf("base url = %q, want jev profile %q", opts.BaseURL, cfg.Jev.BaseURL)
+	}
+	if opts.APIKeyEnv != cfg.Jev.APIKeyEnv {
+		t.Fatalf("api key env = %q, want jev profile %q", opts.APIKeyEnv, cfg.Jev.APIKeyEnv)
+	}
+	// The seeded jev model is empty so --jev alone keeps deterministic scoring.
+	if opts.Model != "" {
+		t.Fatalf("model = %q, want empty deterministic default", opts.Model)
+	}
+}
+
+func TestResolveReportOptionsJevAppliesModelAndClearsFallbacks(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.Jev.Model = "jev-model"
+	cfg.FallbackModels = []string{"a", "b"}
+	opts, err := resolveReportOptions(cfg, []string{"--jev", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Model != "jev-model" {
+		t.Fatalf("model = %q, want jev profile %q", opts.Model, cfg.Jev.Model)
+	}
+	if len(opts.FallbackModels) != 0 {
+		t.Fatalf("FallbackModels = %#v, want cleared under --jev", opts.FallbackModels)
+	}
+}
+
+func TestResolveReportOptionsJevAndLocalMutuallyExclusive(t *testing.T) {
+	t.Parallel()
+	_, err := resolveReportOptions(defaultConfig(), []string{"--jev", "--local", "."})
+	if err == nil {
+		t.Fatal("--jev with --local should be a usage error")
+	}
+	var usage cliUsageError
+	if !errors.As(err, &usage) {
+		t.Fatalf("error = %v, want cliUsageError", err)
+	}
+}
+
+func TestResolveReportOptionsJevCustomBaseDoesNotInheritCredential(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.Jev.APIKeyEnv = "TYPESAFE_API_KEY"
+	opts, err := resolveReportOptions(cfg, []string{"--jev", "--base-url", "https://custom.test/v1", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.APIKeyEnv != "" {
+		t.Fatalf("api key env = %q, want no jev credential inherited by custom endpoint", opts.APIKeyEnv)
 	}
 }
