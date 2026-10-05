@@ -1,5 +1,8 @@
 set positional-arguments
 
+# This module is not part of any parent go.work; run Go commands in module mode.
+export GOWORK := "off"
+
 default:
     @just --list
 
@@ -21,8 +24,8 @@ vet:
 build:
     go build -o slither ./cmd/slither
 
-install:
-    go install ./cmd/slither
+install: build
+    ln -sf "$(pwd)/slither" "$(go env GOBIN)/slither"
 
 check: fmt test-all vet
 
