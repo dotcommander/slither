@@ -501,7 +501,7 @@ func envVarsInCode(rel, text string) []string {
 	return out
 }
 
-func envContractRisk(envVars []string, documented map[string]bool, churn, fixTouches, pathScore, contentScore, unknownsScore int) (int, []string) {
+func envContractRisk(envVars []string, documented map[string]bool, pressure, fixTouches, pathScore, contentScore, unknownsScore int) (int, []string) {
 	var missing []string
 	for _, env := range envVars {
 		if !documented[env] {
@@ -512,7 +512,7 @@ func envContractRisk(envVars []string, documented map[string]bool, churn, fixTou
 		return 0, nil
 	}
 	riskOverlap := pathScore >= 2 || contentScore >= 4 || unknownsScore >= 4
-	changePressure := churn >= 120 || fixTouches > 0
+	changePressure := pressure >= churnPressureFloor || fixTouches > 0
 	if len(missing) == 1 && !riskOverlap && !changePressure {
 		return 0, nil
 	}
@@ -551,14 +551,14 @@ func centralityRisk(incomingRefs, pathScore, contentScore int) (int, []string) {
 	return score, reasons
 }
 
-func cochangeRisk(info cochangeInfo, churn, fixTouches, pathScore, contentScore, centralityScore int) (int, []string) {
+func cochangeRisk(info cochangeInfo, pressure, fixTouches, pathScore, contentScore, centralityScore int) (int, []string) {
 	if info.PartnerCount == 0 {
 		return 0, nil
 	}
 	if info.PartnerCount == 1 && info.MaxJaccard < 0.3 {
 		return 0, nil
 	}
-	riskContext := fixTouches > 0 || churn >= 120 || pathScore >= 3 || contentScore >= 6 || centralityScore > 0
+	riskContext := fixTouches > 0 || pressure >= churnPressureFloor || pathScore >= 3 || contentScore >= 6 || centralityScore > 0
 	if !riskContext {
 		return 0, nil
 	}
@@ -582,22 +582,22 @@ func cochangeRisk(info cochangeInfo, churn, fixTouches, pathScore, contentScore,
 		score += 2
 		reasons = append(reasons, "cochange:bugfix_overlap")
 	}
-	if churn >= 120 {
+	if pressure >= churnPressureFloor {
 		score++
 		reasons = append(reasons, "cochange:churn_overlap")
 	}
 	return score, reasons
 }
 
-func ownershipRisk(info ownershipInfo, churn, fixTouches, pathScore, contentScore int) (int, []string) {
+func ownershipRisk(info ownershipInfo, pressure, fixTouches, pathScore, contentScore int) (int, []string) {
 	if info.Touches == 0 {
 		return 0, nil
 	}
-	reviewPressure := fixTouches > 0 || churn >= 120 || pathScore >= 3 || contentScore >= 8
+	reviewPressure := fixTouches > 0 || pressure >= churnPressureFloor || pathScore >= 3 || contentScore >= 8
 	if info.Touches < 3 || !reviewPressure {
 		return 0, nil
 	}
-	riskContext := fixTouches > 0 || churn >= 120 || (pathScore >= 3 && contentScore >= 4) || contentScore >= 10
+	riskContext := fixTouches > 0 || pressure >= churnPressureFloor || (pathScore >= 3 && contentScore >= 4) || contentScore >= 10
 	if !riskContext {
 		return 0, nil
 	}
@@ -627,11 +627,11 @@ func ownershipRisk(info ownershipInfo, churn, fixTouches, pathScore, contentScor
 	return score, reasons
 }
 
-func staleMarkerRisk(info staleMarkerInfo, churn, fixTouches, pathScore, contentScore, ownershipScore int) (int, []string) {
+func staleMarkerRisk(info staleMarkerInfo, pressure, fixTouches, pathScore, contentScore, ownershipScore int) (int, []string) {
 	if info.StaleCount == 0 {
 		return 0, nil
 	}
-	riskContext := fixTouches > 0 || churn >= 120 || pathScore >= 3 || contentScore >= 6 || ownershipScore > 0
+	riskContext := fixTouches > 0 || pressure >= churnPressureFloor || pathScore >= 3 || contentScore >= 6 || ownershipScore > 0
 	if !riskContext {
 		return 0, nil
 	}
@@ -796,10 +796,10 @@ func branchComplexity(text, rel string) int {
 	return len(regexp.MustCompile(`\b(if|else\s+if|for|while|case|catch|except|switch|select|match)\b|&&|\|\||\?`).FindAllStringIndex(text, -1))
 }
 
-func hotspotRisk(complexity, churn, fixTouches, incomingRefs int) (int, []string) {
+func hotspotRisk(complexity, pressure, fixTouches, incomingRefs int) (int, []string) {
 	score := 0
 	var reasons []string
-	if complexity >= 40 && (fixTouches > 0 || churn >= 120 || incomingRefs >= 5) {
+	if complexity >= 40 && (fixTouches > 0 || pressure >= churnPressureFloor || incomingRefs >= 5) {
 		score += 4
 		reasons = append(reasons, "hotspot:complexity_with_pressure:"+itoa(complexity))
 	}
@@ -822,7 +822,7 @@ func seedScore(row FileEvidence) float64 {
 		artifactPenalty = 0.75
 	}
 	sizeComponent := math.Min(float64(row.Lines)/300.0, 5)
-	churnComponent := math.Min(float64(row.Churn)/120.0, 5)
+	churnComponent := math.Min(float64(row.ChurnAfterCreation)/float64(churnPressureFloor), 5)
 	fixComponent := math.Min(float64(row.FixTouches), 5)
 	markerComponent := math.Min(float64(row.Markers), 5)
 	riskComponent := math.Min(float64(row.PathRisk)/3.0, 5)

@@ -10,6 +10,29 @@ take the strongest raw risk component, divide by three with upward rounding,
 add one point when at least two evidence layers are present, then clamp the
 result to the inclusive range 1–5.
 
+## Churn semantics
+
+Churn is numstat lines added plus deleted over the `--days` window. Because a
+file born large and a file with a repeatedly fixed problem spot can share a
+churn number, the scorer decomposes it before use:
+
+- The file's creation commit is identified from full-history `--diff-filter=A`
+  records. Its churn stays in the reported total but never counts as pressure.
+- `commit_touches` counts commits touching the file inside the window.
+- Every pressure gate (`env_contract`, `cochange`, `ownership`, `stale_marker`,
+  `hotspot`) and the seed score's churn component consume post-creation churn
+  at the unchanged floor of 120 touched lines, not raw churn.
+- The derived `churn_profile` (`creation-dominated`, `reworked`,
+  `recurring-fixes`, `evolving`, `stable`) labels the shape for humans and is
+  emitted as a `churn_profile:*` reason; it adds no new evidence layer beyond
+  the existing churn layer.
+
+When creation cannot be identified — renamed files, or creations older than
+available history — all churn counts as post-creation, which overstates
+pressure rather than hiding it. Bug-fix identification keeps its existing
+heuristic (fix/bug/regression/crash/panic/broken subjects, minimum 30 commits
+in the window) and is unaffected.
+
 ## 2026-07-29 calibration decision
 
 A fresh calibration run pinned `2026-07-29T16:00:00Z` as its single `as_of`

@@ -27,6 +27,8 @@
       "score": 4,
       "seed_score": 4,
       "churn": 0,
+      "commit_touches": 0,
+      "churn_after_creation": 0,
       "fix_touches": 0,
       "markers": 0,
       "imports": 0,

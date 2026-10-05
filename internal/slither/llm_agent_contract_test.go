@@ -185,7 +185,7 @@ func assertStringArray(t *testing.T, value any, want []string, name string) {
 func TestLegacyJSONEnvelopeKeyInventory(t *testing.T) {
 	row := FileEvidence{
 		ID: "file:auth.go", Path: "auth.go", EvidenceClass: "production", Confidence: "high", Actionability: ActionabilityLikelyDefect, Caveat: "caveat", VerifyCmd: "go test ./...", OmittedReason: "none",
-		Bytes: 42, Lines: 3, Score: 4, SeedScore: 3.5, Churn: 1, FixTouches: 2, Markers: 3, Imports: 4, IncomingRefs: 5,
+		Bytes: 42, Lines: 3, Score: 4, SeedScore: 3.5, Churn: 1, CommitTouches: 2, ChurnAfterCreation: 1, ChurnProfile: "reworked", FixTouches: 2, Markers: 3, Imports: 4, IncomingRefs: 5,
 		SmellRisk: 1, HotspotRisk: 1, SDKDXRisk: 1, UnknownsRisk: 1, EnvContractRisk: 1, WorkflowSecurityRisk: 1, MigrationSafetyRisk: 1, ContainerBuildRisk: 1, KubernetesSecurityRisk: 1, TerraformSecurityRisk: 1, OpenAPIContractRisk: 1, CORSSecurityRisk: 1, CookieSecurityRisk: 1, DependencyHealthRisk: 1, CentralityRisk: 1, CochangeRisk: 1, OwnershipRisk: 1, FlakeRisk: 1, OracleRisk: 1, StaleMarkerRisk: 1,
 		TestGap: true, PathRisk: 1, ContentRisk: 1, EvidenceLayers: []string{"content-risk"}, Reasons: []string{"content:unsafe_query:1"}, EvidenceLocations: []EvidenceLocation{{Reason: "content:unsafe_query:1", Line: 2, Snippet: "query"}}, CullDecision: CullDecisionKeptForPremium, CullReason: "strong signal", Summary: "summary", Excerpt: "excerpt",
 	}
@@ -214,7 +214,7 @@ func TestLegacyJSONEnvelopeKeyInventory(t *testing.T) {
 	if !ok {
 		t.Fatalf("row = %#v", rows[0])
 	}
-	assertJSONKeys(t, jsonRow, []string{"id", "path", "evidence_class", "confidence", "actionability", "caveat", "verify_cmd", "omitted_reason", "bytes", "lines", "score", "seed_score", "churn", "fix_touches", "markers", "imports", "incoming_refs", "smell_risk", "hotspot_risk", "sdk_dx_risk", "unknowns_risk", "env_contract_risk", "workflow_security_risk", "migration_safety_risk", "container_build_risk", "kubernetes_security_risk", "terraform_security_risk", "openapi_contract_risk", "cors_security_risk", "cookie_security_risk", "dependency_health_risk", "centrality_risk", "cochange_risk", "ownership_risk", "flake_risk", "oracle_risk", "stale_marker_risk", "test_gap", "path_risk", "content_risk", "evidence_layers", "reasons", "evidence_locations", "cull_decision", "cull_reason", "summary", "excerpt"})
+	assertJSONKeys(t, jsonRow, []string{"id", "path", "evidence_class", "confidence", "actionability", "caveat", "verify_cmd", "omitted_reason", "bytes", "lines", "score", "seed_score", "churn", "commit_touches", "churn_after_creation", "churn_profile", "fix_touches", "markers", "imports", "incoming_refs", "smell_risk", "hotspot_risk", "sdk_dx_risk", "unknowns_risk", "env_contract_risk", "workflow_security_risk", "migration_safety_risk", "container_build_risk", "kubernetes_security_risk", "terraform_security_risk", "openapi_contract_risk", "cors_security_risk", "cookie_security_risk", "dependency_health_risk", "centrality_risk", "cochange_risk", "ownership_risk", "flake_risk", "oracle_risk", "stale_marker_risk", "test_gap", "path_risk", "content_risk", "evidence_layers", "reasons", "evidence_locations", "cull_decision", "cull_reason", "summary", "excerpt"})
 	evidenceLocations := jsonArray(t, jsonRow["evidence_locations"], "evidence_locations")
 	assertJSONKeys(t, jsonObject(t, evidenceLocations[0], "evidence location"), []string{"reason", "line", "snippet"})
 	whyTop := jsonArray(t, envelope["why_top"], "why_top")

@@ -402,20 +402,21 @@ func writeDetailedSignalsMarkdown(b *strings.Builder, rows []FileEvidence) {
 		fmt.Fprintf(b, "Showing the first `%d` of `%d` rows; full per-risk fields remain available in `--json` output.\n\n", maxDetailedMarkdownRows, len(rows))
 		rows = rows[:maxDetailedMarkdownRows]
 	} else {
-		fmt.Fprintf(b, "Raw per-risk fields remain available in `--json` output; this table keeps the Markdown reviewable.\n\n")
+		fmt.Fprintf(b, "Raw per-risk fields remain available in `--json` output; this table keeps the Markdown reviewable. `churn` counts numstat lines added+deleted over the window; `post-create` excludes the creation commit — read it (not raw churn) as change pressure, with the `churn_profile:*` reason labeling the shape (creation-dominated, reworked, recurring-fixes, evolving).\n\n")
 	}
-	fmt.Fprintf(b, "| rank | file | seed_score | class | actionability | churn | fix_touches | lines | key risk fields | test_gap | reasons |\n")
-	fmt.Fprintf(b, "| ---: | --- | ---: | --- | --- | ---: | ---: | ---: | --- | --- | --- |\n")
+	fmt.Fprintf(b, "| rank | file | seed_score | class | actionability | churn | post-create | fix_touches | lines | key risk fields | test_gap | reasons |\n")
+	fmt.Fprintf(b, "| ---: | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |\n")
 	for i, row := range rows {
 		fmt.Fprintf(
 			b,
-			"| %d | %s | %.2f | %s | %s | %d | %d | %d | %s | %t | %s |\n",
+			"| %d | %s | %.2f | %s | %s | %d | %d | %d | %d | %s | %t | %s |\n",
 			i+1,
 			markdownCodeCell(row.Path),
 			row.SeedScore,
 			cellOrDash(row.EvidenceClass),
 			cellOrDash(string(actionabilityForRow(row))),
 			row.Churn,
+			row.ChurnAfterCreation,
 			row.FixTouches,
 			row.Lines,
 			escapeCell(compactList(keyRiskFields(row), 4)),

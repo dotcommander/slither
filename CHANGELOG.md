@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Decomposed churn so review pressure separates from file size: rows now
+  carry `commit_touches`, `churn_after_creation` (churn excluding the creation
+  commit, identified from full-history add records), and a derived
+  `churn_profile` (`creation-dominated`, `reworked`, `recurring-fixes`,
+  `evolving`, `stable`) emitted as a `churn_profile:*` reason. Every pressure
+  gate and the seed score's churn component now consume post-creation churn at
+  the unchanged floor of 120 touched lines, so a file born large no longer
+  outranks a repeatedly fixed one. The Markdown detail table gained a
+  `post-create` column; unidentified creations (renames, pre-window history)
+  conservatively count all churn as pressure. Calibration fixture population
+  digests were refreshed for the additive row fields; recorded labels and
+  verdicts are unchanged.
+
 ## v0.3.0 (2026-07-30)
 
 - Made command help position-independent without stealing flag values, scrubbed

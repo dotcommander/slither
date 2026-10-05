@@ -322,7 +322,8 @@ The Markdown report leads with **Executive Triage** (confidence breakdown,
 review lanes, and a start-here pointer), then **Ranked Files** (a compact table
 of the top production files with confidence, actionability, evidence, review
 command, key signals, and a note), and finally **Detailed Signals** (per-file
-seed score, class, actionability, churn, and risk fields). Generated,
+seed score, class, actionability, churn with its post-creation component, and
+risk fields). Generated,
 documentation, and test/fixture files are omitted from the ranked queue and
 appear in separate **Documentation Rows** and **Test Risk Rows** sections when
 present; `--json` retains the full evidence set. Discovery counts, the pattern
@@ -332,6 +333,26 @@ than treated as low risk.
 When an output file already exists, the next report includes a freshness hint if
 that previous output was older than the newest scanned file before the current
 run rewrote it.
+
+### Churn decomposition
+
+Raw `churn` counts numstat lines added plus deleted over the history window,
+which mixes two unrelated shapes: files born large that barely changed since,
+and files with a problem spot that keeps changing. Every row therefore also
+carries:
+
+| Field | Meaning |
+| --- | --- |
+| `commit_touches` | Commits that touched the file inside the window. |
+| `churn_after_creation` | Churn excluding the file's creation commit. When the creation predates the window or cannot be identified (renames), this equals raw churn — the conservative direction for review pressure. |
+| `churn_profile` reason | `churn_profile:creation-dominated` (churn is mostly size), `churn_profile:reworked` (a small number of large post-creation rewrites), `churn_profile:recurring-fixes` (repeated bug-fix visits — the problem-spot shape), or `churn_profile:evolving` (steady post-creation change). Single-touch files stay `stable` and emit no profile reason. |
+
+Read the `post-create` column (Markdown) or `churn_after_creation` (JSON) —
+not raw churn — as change pressure, and read it beside `fix_touches`: a large
+file created once and a small file fixed five times can share a churn number
+while meaning opposite things for review priority. Scoring agrees: every
+pressure gate and the seed score's churn component consume post-creation churn
+only.
 
 ### Actionability
 

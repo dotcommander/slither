@@ -44,6 +44,9 @@ type FileEvidence struct {
 	Score                  int                `json:"score"`
 	SeedScore              float64            `json:"seed_score"`
 	Churn                  int                `json:"churn"`
+	CommitTouches          int                `json:"commit_touches"`
+	ChurnAfterCreation     int                `json:"churn_after_creation"`
+	ChurnProfile           string             `json:"churn_profile,omitempty"`
 	FixTouches             int                `json:"fix_touches"`
 	Markers                int                `json:"markers"`
 	Imports                int                `json:"imports"`

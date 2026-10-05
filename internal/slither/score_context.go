@@ -21,7 +21,7 @@ var errGitOutputLimit = errors.New("git output exceeded limit")
 
 type scoreContext struct {
 	files         []string
-	churn         map[string]int
+	churn         map[string]churnStats
 	fixTouches    map[string]int
 	cochange      map[string]cochangeInfo
 	ownership     map[string]ownershipInfo
@@ -44,7 +44,7 @@ func newScoreContext(ctx context.Context, repo string, files []string, maxBytes 
 		patterns:      patterns,
 	}
 	historyWindow := gitHistoryWindow(days, asOf)
-	churn, skip := churnByFile(ctx, repo, historyWindow)
+	churn, skip := churnStatsByFile(ctx, repo, historyWindow)
 	scoreCtx.churn = churn
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "churn:"+skip)
@@ -113,17 +113,34 @@ func (bounds gitHistoryBounds) args() []string {
 	return []string{"--since=" + bounds.Since, "--until=" + bounds.Until}
 }
 
-func churnByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]int, string) {
-	args := append(bounds.args(), "--numstat", "--format=")
+// churnStats decomposes per-file churn so review pressure can be separated
+// from file size: Total is raw numstat additions+deletions over the window,
+// AfterCreate excludes the churn contributed by the file's creation commit
+// (equal to Total when the creation happened before the window or cannot be
+// identified), and Touches counts commits that touched the file.
+type churnStats struct {
+	Total       int
+	AfterCreate int
+	Touches     int
+}
+
+func churnStatsByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]churnStats, string) {
+	creation := fileCreationCommits(ctx, repo)
+	args := append(bounds.args(), "--numstat", "--format=%H")
 	out, err := runGitOutput(ctx, repo, append([]string{"log"}, args...)...)
 	if err != nil {
-		return map[string]int{}, gitSkipReason(err)
+		return map[string]churnStats{}, gitSkipReason(err)
 	}
 	if out == "" {
-		return map[string]int{}, "no recent git history"
+		return map[string]churnStats{}, "no recent git history"
 	}
-	churn := map[string]int{}
+	stats := map[string]churnStats{}
+	commit := ""
 	for _, line := range strings.Split(out, "\n") {
+		if hash, ok := commitHashLine(line); ok {
+			commit = hash
+			continue
+		}
 		parts := strings.Split(line, "\t")
 		if len(parts) != 3 || parts[0] == "-" || parts[1] == "-" {
 			continue
@@ -133,9 +150,61 @@ func churnByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map
 		if errA != nil || errD != nil {
 			continue
 		}
-		churn[numstatPath(parts[2])] += added + deleted
+		path := numstatPath(parts[2])
+		s := stats[path]
+		s.Total += added + deleted
+		s.Touches++
+		if commit != "" && commit == creation[path] {
+			// Creation churn stays in Total but never counts as pressure.
+		} else {
+			s.AfterCreate += added + deleted
+		}
+		stats[path] = s
 	}
-	return churn, ""
+	return stats, ""
+}
+
+// fileCreationCommits maps each path to the newest commit that added it over
+// full history. Files whose creation cannot be identified (renames, files
+// predating detection) are absent; their churn then counts entirely as
+// post-creation pressure, which is the conservative direction for review.
+func fileCreationCommits(ctx context.Context, repo string) map[string]string {
+	out, err := runGitOutput(ctx, repo, "log", "--diff-filter=A", "--name-only", "--format=%H")
+	if err != nil || out == "" {
+		return map[string]string{}
+	}
+	creation := map[string]string{}
+	commit := ""
+	for _, line := range strings.Split(out, "\n") {
+		if hash, ok := commitHashLine(line); ok {
+			commit = hash
+			continue
+		}
+		path := strings.TrimSpace(line)
+		if path == "" || commit == "" {
+			continue
+		}
+		if _, seen := creation[path]; !seen {
+			creation[path] = commit
+		}
+	}
+	return creation
+}
+
+func commitHashLine(line string) (string, bool) {
+	if len(line) < 40 || len(line) > 64 {
+		return "", false
+	}
+	for _, r := range line {
+		if !isHexDigit(r) {
+			return "", false
+		}
+	}
+	return line, true
+}
+
+func isHexDigit(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')
 }
 
 func numstatPath(field string) string {

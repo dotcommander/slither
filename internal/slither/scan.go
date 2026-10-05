@@ -807,8 +807,12 @@ func trimIncompleteUTF8(data []byte) ([]byte, bool) {
 }
 
 func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
-	e.Churn = scoreCtx.churn[e.Path]
+	churn := scoreCtx.churn[e.Path]
+	e.Churn = churn.Total
+	e.CommitTouches = churn.Touches
+	e.ChurnAfterCreation = churn.AfterCreate
 	e.FixTouches = scoreCtx.fixTouches[e.Path]
+	e.ChurnProfile = classifyChurnProfile(e.Churn, e.ChurnAfterCreation, e.CommitTouches, e.FixTouches)
 	e.IncomingRefs = scoreCtx.incomingRefs[e.Path]
 	e.Markers = len(markerPattern.FindAllStringIndex(text, -1))
 
@@ -823,7 +827,7 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	e.Reasons = append(e.Reasons, reasons...)
 	e.EvidenceLocations = append(e.EvidenceLocations, unknownsEvidenceLocations(e.Path, text, reasons)...)
 	envVars := envVarsInCode(e.Path, text)
-	e.EnvContractRisk, reasons = envContractRisk(envVars, scoreCtx.documentedEnv, e.Churn, e.FixTouches, e.PathRisk, e.ContentRisk, e.UnknownsRisk)
+	e.EnvContractRisk, reasons = envContractRisk(envVars, scoreCtx.documentedEnv, e.ChurnAfterCreation, e.FixTouches, e.PathRisk, e.ContentRisk, e.UnknownsRisk)
 	e.Reasons = append(e.Reasons, reasons...)
 	detectorText := textWithoutDetectorLiterals(text)
 	e.WorkflowSecurityRisk, reasons = workflowSecurityRisk(e.Path, detectorText)
@@ -848,17 +852,17 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	e.Reasons = append(e.Reasons, reasons...)
 	e.CentralityRisk, reasons = centralityRisk(e.IncomingRefs, e.PathRisk, e.ContentRisk)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.CochangeRisk, reasons = cochangeRisk(scoreCtx.cochange[e.Path], e.Churn, e.FixTouches, e.PathRisk, e.ContentRisk, e.CentralityRisk)
+	e.CochangeRisk, reasons = cochangeRisk(scoreCtx.cochange[e.Path], e.ChurnAfterCreation, e.FixTouches, e.PathRisk, e.ContentRisk, e.CentralityRisk)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.OwnershipRisk, reasons = ownershipRisk(scoreCtx.ownership[e.Path], e.Churn, e.FixTouches, e.PathRisk, e.ContentRisk)
+	e.OwnershipRisk, reasons = ownershipRisk(scoreCtx.ownership[e.Path], e.ChurnAfterCreation, e.FixTouches, e.PathRisk, e.ContentRisk)
 	e.Reasons = append(e.Reasons, reasons...)
 	e.FlakeRisk, reasons = testFlakeRisk(e.Path, text)
 	e.Reasons = append(e.Reasons, reasons...)
 	e.OracleRisk, reasons = testOracleRisk(e.Path, text, e.Lines)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.StaleMarkerRisk, reasons = staleMarkerRisk(scoreCtx.staleMarkers[e.Path], e.Churn, e.FixTouches, e.PathRisk, e.ContentRisk, e.OwnershipRisk)
+	e.StaleMarkerRisk, reasons = staleMarkerRisk(scoreCtx.staleMarkers[e.Path], e.ChurnAfterCreation, e.FixTouches, e.PathRisk, e.ContentRisk, e.OwnershipRisk)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.HotspotRisk, reasons = hotspotRisk(branchComplexity(text, e.Path), e.Churn, e.FixTouches, e.IncomingRefs)
+	e.HotspotRisk, reasons = hotspotRisk(branchComplexity(text, e.Path), e.ChurnAfterCreation, e.FixTouches, e.IncomingRefs)
 	e.Reasons = append(e.Reasons, reasons...)
 	if repo != "" && e.Lines >= 80 && !isTestFile(e.Path) && isArchitectureSource(e.Path) && !hasNearbyTest(repo, e.Path) {
 		e.TestGap = true
@@ -872,6 +876,9 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	}
 	if e.Churn > 0 {
 		e.Reasons = append(e.Reasons, "churn:"+itoa(e.Churn))
+		if e.ChurnProfile != ChurnProfileStable {
+			e.Reasons = append(e.Reasons, "churn_profile:"+e.ChurnProfile)
+		}
 	}
 	if e.FixTouches > 0 {
 		e.Reasons = append(e.Reasons, "bugfix_touches:"+itoa(e.FixTouches))
@@ -922,7 +929,7 @@ func evidenceLayersForReasons(reasons []string) []string {
 			layers = appendLayer(layers, "size")
 		case strings.HasPrefix(reason, "markers:"):
 			layers = appendLayer(layers, "work-marker")
-		case strings.HasPrefix(reason, "churn:"):
+		case strings.HasPrefix(reason, "churn:"), strings.HasPrefix(reason, "churn_profile:"):
 			layers = appendLayer(layers, "churn")
 		case strings.HasPrefix(reason, "bugfix_touches:"):
 			layers = appendLayer(layers, "bugfix-history")
