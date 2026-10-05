@@ -323,3 +323,68 @@ func TestAsyncMessagingBoundaryRequiresCallShape(t *testing.T) {
 		}
 	}
 }
+
+func TestFlakeRiskDistinguishesSeededRandomness(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"seeded source is deterministic", "rng := rand.New(rand.NewSource(42))\n_ = rng\n", false},
+		{"global rand is nondeterministic", "if rand.Intn(2) == 0 {\n", true},
+		{"v2 global rand is nondeterministic", "if rand.IntN(2) == 0 {\n", true},
+		{"time-seeded source is nondeterministic", "rng := rand.New(rand.NewSource(time.Now().UnixNano()))\n_ = rng\n", true},
+		{"httptest server is the deterministic standard", "srv := httptest.NewServer(h)\n_ = srv\n", false},
+		{"real network call is flake-prone", "resp, err := http.Get(\"https://example.com\")\n_ = resp\n_ = err\n", true},
+		{"frozen clock input is deterministic", "at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)\n_ = at\n", false},
+		{"live clock read is nondeterministic", "now := time.Now()\n_ = now\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			score, reasons := testFlakeRisk("pkg/x_test.go", tt.src)
+			fired := false
+			for _, reason := range reasons {
+				if reason == "flake:nondeterministic_or_io:1" {
+					fired = true
+				}
+			}
+			if fired != tt.want {
+				t.Fatalf("nondeterministic_or_io fired=%t, want %t (reasons=%v, score=%d)", fired, tt.want, reasons, score)
+			}
+		})
+	}
+}
+
+func TestFlakeRiskIgnoresSynctestBubbles(t *testing.T) {
+	t.Parallel()
+	src := "package memory\n\nimport (\n\t\"testing\"\n\t\"testing/synctest\"\n\t\"time\"\n)\n\nfunc TestExpiry(t *testing.T) {\n\tsynctest.Run(t, func(t *testing.T) {\n\t\ttime.Sleep(31 * time.Minute)\n\t})\n}\n"
+	score, reasons := testFlakeRisk("judgment/memory/memory_test.go", src)
+	for _, reason := range reasons {
+		if reason == "flake:fixed_wait:1" {
+			t.Fatalf("synctest-bubbled sleep counted as fixed_wait (reasons=%v)", reasons)
+		}
+	}
+	if score != 0 {
+		t.Fatalf("synctest test scored flake risk %d, want 0 (reasons=%v)", score, reasons)
+	}
+	real := "package p\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestPoll(t *testing.T) {\n\ttime.Sleep(50 * time.Millisecond)\n}\n"
+	if score, reasons := testFlakeRisk("pkg/p_test.go", real); score == 0 || len(reasons) == 0 {
+		t.Fatalf("real-clock sleep not flagged (score=%d reasons=%v)", score, reasons)
+	}
+}
+
+func TestIsTestFileRecognizesTestScripts(t *testing.T) {
+	t.Parallel()
+	for _, rel := range []string{"scripts/check_boundaries_test.sh", "scripts/run_test.bash", "a/b_test.zsh"} {
+		if !isTestFile(rel) {
+			t.Fatalf("isTestFile(%q) = false, want true", rel)
+		}
+	}
+	for _, rel := range []string{"scripts/release.sh", "scripts/deploy.bash"} {
+		if isTestFile(rel) {
+			t.Fatalf("isTestFile(%q) = true, want false", rel)
+		}
+	}
+}

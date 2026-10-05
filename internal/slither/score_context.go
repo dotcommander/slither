@@ -806,6 +806,9 @@ func isTestFile(rel string) bool {
 	if ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" {
 		return strings.Contains(name, ".test.") || strings.Contains(name, ".spec.")
 	}
+	if ext == ".sh" || ext == ".bash" || ext == ".zsh" {
+		return strings.HasSuffix(name, "_test.sh") || strings.HasSuffix(name, "_test.bash") || strings.HasSuffix(name, "_test.zsh")
+	}
 	if ext == ".py" {
 		return strings.HasPrefix(name, "test_") || strings.HasSuffix(name, "_test.py") || strings.Contains(lower, "/tests/")
 	}

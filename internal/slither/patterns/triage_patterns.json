@@ -409,7 +409,7 @@
     },
     {
       "id": "offset_pagination",
-      "pattern": "(?i)\\bOFFSET\\s+\\d+\\b|\\.offset\\s*\\(",
+      "pattern": "\\bOFFSET\\s+\\d+\\b|\\.offset\\s*\\(",
       "weight": 2,
       "max_matches": 4
     },

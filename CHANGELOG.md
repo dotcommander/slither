@@ -21,6 +21,17 @@
   messaging boundary at weight 3). Brand names (Kafka, RabbitMQ, SQS, …)
   still match anywhere; the generic words now require call shape
   (`Publish(`, `Subscribe(`), since Go capitalizes every exported identifier.
+- Recalibrated test-flake detection on the same evidence: deterministically
+  seeded sources (`rand.New(rand.NewSource(42))`, the responsible pattern)
+  and in-process `httptest` servers no longer count as nondeterminism —
+  only global rand calls (auto-seeded since Go 1.20), time-seeded sources,
+  live `time.Now`, and real network calls do; `time.Sleep` in a file that
+  imports `testing/synctest` is treated as the fake clock it is (observed:
+  seven 30–61-minute virtual waits in memory tests flagged as fixed waits).
+  `offset_pagination` no longer matches case-insensitively, so prose about
+  character offsets stays out of SQL-pagination risk, and `isTestFile` now
+  recognizes `*_test.sh/.bash/.zsh` so test scripts get the test caveat and
+  flake/oracle gating instead of production ranking.
 - Hardened two attribution heuristics found while triaging reliquary. Bug-fix
   subjects now match on word boundaries (fix/bug/regression/crash/panic/broken
   plus bugfix/hotfix and common inflections), so subjects like "add nomic task

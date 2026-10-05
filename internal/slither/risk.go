@@ -810,11 +810,15 @@ func testFlakeRisk(rel, text string) (int, []string) {
 	}
 	score := 0
 	var reasons []string
-	if count := len(regexp.MustCompile(`\btime\.Sleep\s*\(`).FindAllStringIndex(text, -1)); count > 0 {
-		score += min(count*3, 6)
-		reasons = append(reasons, "flake:fixed_wait:"+itoa(count))
+	// time.Sleep inside a testing/synctest bubble runs on the fake clock and
+	// is deterministic by construction; only real-clock waits are flake risk.
+	if !strings.Contains(text, "testing/synctest") {
+		if count := len(regexp.MustCompile(`\btime\.Sleep\s*\(`).FindAllStringIndex(text, -1)); count > 0 {
+			score += min(count*3, 6)
+			reasons = append(reasons, "flake:fixed_wait:"+itoa(count))
+		}
 	}
-	if count := len(regexp.MustCompile(`\b(rand\.|time\.Now\s*\(|httptest\.|http\.Get\s*\()`).FindAllStringIndex(text, -1)); count > 0 {
+	if count := len(regexp.MustCompile(`\b(rand\.(?:Intn|IntN|Int|Int31|Int32|Int32N|Int63|Int64|Int64N|Uint|Uint32|Uint64|UintN|Float32|Float64|NormFloat64|ExpFloat64|Perm|Shuffle)\s*\(|rand\.(?:NewSource|Seed)\s*\([^)\n]*time\.Now|time\.Now\s*\(|http\.(?:Get|Post|Head)\s*\()`).FindAllStringIndex(text, -1)); count > 0 {
 		score += min(count*2, 6)
 		reasons = append(reasons, "flake:nondeterministic_or_io:"+itoa(count))
 	}
