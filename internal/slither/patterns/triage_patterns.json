@@ -529,7 +529,7 @@
     },
     {
       "id": "async_messaging_boundary",
-      "pattern": "\\b(Kafka|RabbitMQ|PubSub|pubsub|SQS|SNS|Redis Streams|NATS|Queue|Topic|Consumer|Producer|Subscribe|Publish)\\b",
+      "pattern": "\\b(Kafka|RabbitMQ|PubSub|pubsub|SQS|SNS|Redis Streams|NATS)\\b|\\b(Queue|Topic|Consumer|Producer|Subscribe|Publish)\\w*\\s*\\(",
       "weight": 3,
       "max_matches": 5
     },

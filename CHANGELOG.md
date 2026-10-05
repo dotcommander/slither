@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Three hygiene fixes from the second reliquary triage pass. Documentation-
+  only files (≤3 code lines after comment stripping, ≥10 non-blank lines) no
+  longer score content/unknowns patterns — observed `vector/doc.go`, a pure
+  package doc, ranked #9 of 68 production files on prose words like
+  "helpers" and "recall" (`custom_infra_reinvention:4`) — and carry an
+  explicit `doc_only:content_patterns_skipped` marker. Files under an
+  `examples`/`example` directory segment no longer emit
+  `test_gap:no nearby test` (quickstarts are executable documentation;
+  the user-surface lane owns their review). Discovery now excludes the
+  tool's own report outputs (`slither-report.*`, `slither-summary.*`,
+  `slither-cull*`), so rescanning a repo after writing a summary no longer
+  feeds slither's artifacts back in as evidence rows.
+- Recalibrated `async_messaging_boundary` after a Go capitalization
+  collision: exported struct fields like the retrieval eval `Topic` matched
+  the bare capitalized `Queue|Topic|Consumer|Producer|Subscribe|Publish`
+  alternatives (14 files flagged, including an offline tuner scored as a
+  messaging boundary at weight 3). Brand names (Kafka, RabbitMQ, SQS, …)
+  still match anywhere; the generic words now require call shape
+  (`Publish(`, `Subscribe(`), since Go capitalizes every exported identifier.
 - Hardened two attribution heuristics found while triaging reliquary. Bug-fix
   subjects now match on word boundaries (fix/bug/regression/crash/panic/broken
   plus bugfix/hotfix and common inflections), so subjects like "add nomic task

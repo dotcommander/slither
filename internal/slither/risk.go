@@ -136,6 +136,44 @@ func pathTermMatches(path, term string) bool {
 	return re.FindStringIndex(path) != nil
 }
 
+// documentationOnlySource reports whether a file is essentially prose: at
+// most a handful of code lines (package clause, imports) with the rest
+// comments or blanks. Observed defect: vector/doc.go — a comment-only Go
+// package doc — scored custom_infra_reinvention and audit_metric hits from
+// ordinary English ("helpers", "recall") and ranked above real code.
+func documentationOnlySource(text string) bool {
+	codeLines := 0
+	nonBlank := 0
+	inBlockComment := false
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		nonBlank++
+		if inBlockComment {
+			if strings.Contains(line, "*/") {
+				inBlockComment = false
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "/*") {
+			if !strings.Contains(line, "*/") {
+				inBlockComment = true
+			}
+			continue
+		}
+		codeLines++
+		if codeLines > 3 {
+			return false
+		}
+	}
+	return nonBlank >= 10
+}
+
 func contentRisk(patterns scoringPatterns, rel, text string) (int, []string) {
 	score, reasons, _ := contentRiskWithLocations(patterns, rel, text)
 	return score, reasons

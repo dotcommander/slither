@@ -47,6 +47,23 @@ hub — read it as "this package is heavily imported," not "this file has N
 direct dependents." The score contribution is unchanged; only the label
 protects the reading.
 
+## Documentation-only files, examples, and self outputs
+
+Three hygiene rules keep prose and demo surface out of code risk:
+
+- **Doc-only files** (`doc.go`-style comment files: ≤3 code lines after
+  stripping comments/blanks) skip content and unknowns patterns entirely —
+  their vocabulary is English ("helpers", "recall", "embedding"), which
+  pattern matching on prose would misread as code shape — and emit
+  `doc_only:content_patterns_skipped` so the absence is visible. Git-history
+  evidence (churn, fixes, ownership) still applies: documentation does rot.
+- **Examples/example directories** never emit `test_gap:no nearby test`:
+  quickstarts are executable documentation, and the user-surface lane already
+  owns their review; demanding unit tests for demos is structural noise.
+- **Slither's own outputs** (`slither-report.*`, `slither-summary.*`,
+  `slither-cull*`) are excluded from discovery so writing a report into a
+  repo and rescanning never feeds the tool's artifacts back in as evidence.
+
 ## 2026-07-29 calibration decision
 
 A fresh calibration run pinned `2026-07-29T16:00:00Z` as its single `as_of`

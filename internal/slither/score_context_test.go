@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -133,5 +134,192 @@ func TestCentralityReasonDistinguishesPackageLevelAttribution(t *testing.T) {
 	}
 	if pkgReasons[0] != "centrality:package_refs:32" {
 		t.Fatalf("package-level reason = %q", pkgReasons[0])
+	}
+}
+
+func TestDocumentationOnlySource(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "comment-only package doc",
+			text: "// Package vectors provides helpers.\n" +
+				"//\n" +
+				"// Recall and precision helpers support custom compact storage\n" +
+				"// and approximate pre-filtering for embedding pipelines.\n" +
+				strings.Repeat("// prose line about utils and metrics\n", 8) +
+				"package vector\n",
+			want: true,
+		},
+		{
+			name: "block-comment-heavy file",
+			text: "package main\n\n/*\n" + strings.Repeat(" prose about helpers\n", 10) + "*/\n",
+			want: true,
+		},
+		{
+			name: "hash-comment script doc",
+			text: "# prose about helpers\n" + strings.Repeat("# recall metrics\n", 9) + "x = 1\n",
+			want: true,
+		},
+		{
+			name: "normal code file",
+			text: "package main\n\nfunc main() {\n\tprintln(\"helpers\")\n}\n" + strings.Repeat("// comment\n", 10),
+			want: false,
+		},
+		{
+			name: "small file is not documentation classed",
+			text: "// tiny\npackage p\n",
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := documentationOnlySource(tt.text); got != tt.want {
+				t.Fatalf("documentationOnlySource(%s) = %t, want %t", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShouldSkipExcludesOwnReportOutputs(t *testing.T) {
+	t.Parallel()
+	for _, rel := range []string{"slither-summary.md", "slither-report.json", "sub/slither-summary.json", "docs/slither-cull-2026.md"} {
+		if !shouldSkip(rel) {
+			t.Fatalf("shouldSkip(%q) = false, want true (own output artifact)", rel)
+		}
+	}
+	for _, rel := range []string{"README.md", "internal/report.go", "docs/summary.md"} {
+		if shouldSkip(rel) {
+			t.Fatalf("shouldSkip(%q) = true, want false (not an own output)", rel)
+		}
+	}
+}
+
+func TestBuildReportHygieneDocOnlyExamplesSelfOutputs(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		full := filepath.Join(repo, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Comment-only package doc full of content-pattern vocabulary.
+	write("vector/doc.go", "// Package vectors provides helpers and utils.\n"+
+		"//\n"+
+		"// Recall and precision metrics support custom compact storage and\n"+
+		"// approximate pre-filtering for embedding pipelines.\n"+
+		strings.Repeat("// prose about helpers, recall, and embedding\n", 8)+
+		"package vector\n")
+	// Example quickstart with real code and no nearby test.
+	write("examples/demo/main.go", "package main\n\nimport \"fmt\"\n\nfunc main() {\n"+
+		strings.Repeat("\tfmt.Println(\"step\")\n\tfmt.Println(\"helper\")\n", 20)+"\n}\n")
+	// Control: a regular code file using pattern vocabulary in code.
+	write("worker.go", "package main\n\nfunc embedHelper() int { return 1 }\n\nfunc run() {\n"+
+		strings.Repeat("\tembedHelper()\n", 10)+"}\n")
+	// Slither's own output artifact written into the repo root.
+	write("slither-summary.md", "# Slither Summary\n\n- rows: 3\n")
+
+	report, err := BuildReport(context.Background(), Options{Repo: repo, Top: 50, MaxBytes: 1 << 20, Days: 90})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	rows := map[string]FileEvidence{}
+	for _, r := range report.Rows {
+		rows[r.Path] = r
+	}
+
+	doc, ok := rows["vector/doc.go"]
+	if !ok {
+		t.Fatal("vector/doc.go row missing")
+	}
+	if doc.ContentRisk != 0 || doc.UnknownsRisk != 0 {
+		t.Fatalf("doc-only file scored content=%d unknowns=%d, want 0/0", doc.ContentRisk, doc.UnknownsRisk)
+	}
+	hasDocMarker := false
+	for _, reason := range doc.Reasons {
+		if strings.HasPrefix(reason, "content:") {
+			t.Fatalf("doc-only file carries content reason %q", reason)
+		}
+		if reason == "doc_only:content_patterns_skipped" {
+			hasDocMarker = true
+		}
+		if reason == "test_gap:no nearby test" {
+			t.Fatalf("doc-only file carries test_gap")
+		}
+	}
+	if !hasDocMarker {
+		t.Fatalf("doc-only file lacks doc_only:content_patterns_skipped marker, reasons=%v", doc.Reasons)
+	}
+
+	demo, ok := rows["examples/demo/main.go"]
+	if !ok {
+		t.Fatal("examples/demo/main.go row missing")
+	}
+	for _, reason := range demo.Reasons {
+		if reason == "test_gap:no nearby test" {
+			t.Fatalf("example carries test_gap; the user-surface lane owns example review")
+		}
+	}
+
+	if _, ok := rows["slither-summary.md"]; ok {
+		t.Fatal("slither-summary.md discovered as evidence row; own outputs must be skipped")
+	}
+
+	worker, ok := rows["worker.go"]
+	if !ok {
+		t.Fatal("worker.go row missing")
+	}
+	if worker.ContentRisk == 0 {
+		t.Fatalf("control code file lost content risk; doc-only gate over-applied, reasons=%v", worker.Reasons)
+	}
+}
+
+func TestAsyncMessagingBoundaryRequiresCallShape(t *testing.T) {
+	t.Parallel()
+	patterns, err := loadScoringPatterns("")
+	if err != nil {
+		t.Fatalf("loadScoringPatterns: %v", err)
+	}
+	var async *contentPattern
+	for i := range patterns.ContentPatterns {
+		if patterns.ContentPatterns[i].ID == "async_messaging_boundary" {
+			async = &patterns.ContentPatterns[i]
+			break
+		}
+	}
+	if async == nil {
+		t.Fatal("async_messaging_boundary pattern missing from embedded catalog")
+	}
+	// Go exported identifiers are always capitalized, so bare capitalized
+	// generic words collide with ordinary domain fields (observed: the
+	// retrieval eval Topic struct field scored as pub/sub middleware).
+	for _, src := range []string{
+		"type ScoreSignals struct {\n\tTopic string\n}\n",
+		"result := ScoredResult{ID: id, Topic: candidate.Topic}\n",
+		"const maxQueueDepth = 4\n",
+	} {
+		if matched, err := async.Pattern.MatchString(src); err != nil || matched {
+			t.Fatalf("async_messaging_boundary matched non-messaging shape %q (matched=%t err=%v)", src, matched, err)
+		}
+	}
+	for _, src := range []string{
+		"p.Publish(ctx, msg)\n",
+		"ch.Subscribe(topic)\n",
+		"// ack after the Kafka commit before acknowledging\n",
+	} {
+		matched, err := async.Pattern.MatchString(src)
+		if err != nil || !matched {
+			t.Fatalf("async_messaging_boundary missed real messaging shape %q (matched=%t err=%v)", src, matched, err)
+		}
 	}
 }

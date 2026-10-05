@@ -812,6 +812,19 @@ func isTestFile(rel string) bool {
 	return strings.Contains(lower, "/test/") || strings.Contains(lower, "/tests/")
 }
 
+// isExamplesPath reports whether a file lives under an examples/example
+// directory segment. Demos are executable documentation: the user-surface
+// lane already reviews them, and demanding a nearby test for a quickstart
+// adds structural noise rather than risk.
+func isExamplesPath(rel string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "examples" || part == "example" {
+			return true
+		}
+	}
+	return false
+}
+
 func hasNearbyTest(repo, rel string) bool {
 	if isTestFile(rel) {
 		return true

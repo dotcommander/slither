@@ -727,6 +727,16 @@ func shouldSkip(rel string) bool {
 			return true
 		}
 	}
+	// Never discover the tool's own report outputs: writing a summary into a
+	// repo and then rescanning it would feed slither's artifacts back in as
+	// evidence rows and destabilize report identity across repeat runs.
+	switch strings.ToLower(filepath.Base(rel)) {
+	case "slither-report.md", "slither-report.json", "slither-summary.md", "slither-summary.json":
+		return true
+	}
+	if strings.Contains(strings.ToLower(filepath.Base(rel)), "slither-cull") {
+		return true
+	}
 	lower := strings.ToLower(rel)
 	for _, suffix := range skipSuffixes {
 		if strings.HasSuffix(lower, suffix) {
@@ -816,16 +826,26 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	e.IncomingRefs = scoreCtx.incomingRefs[e.Path]
 	e.Markers = len(markerPattern.FindAllStringIndex(text, -1))
 
+	docOnly := documentationOnlySource(text)
 	var reasons []string
 	e.PathRisk, reasons = pathRisk(scoreCtx.patterns, e.Path)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.ContentRisk, reasons, e.EvidenceLocations = contentRiskWithLocations(scoreCtx.patterns, e.Path, text)
-	e.Reasons = append(e.Reasons, reasons...)
+	if docOnly {
+		// Content and unknowns patterns are calibrated for code shape;
+		// prose naturally contains their vocabulary ("helpers", "recall",
+		// "embedding"), so a comment-only file must not score as code risk.
+		e.Reasons = append(e.Reasons, "doc_only:content_patterns_skipped")
+	} else {
+		e.ContentRisk, reasons, e.EvidenceLocations = contentRiskWithLocations(scoreCtx.patterns, e.Path, text)
+		e.Reasons = append(e.Reasons, reasons...)
+	}
 	e.Imports, e.SmellRisk, reasons = architectureSmellRisk(text, e.Path, e.Lines)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.UnknownsRisk, reasons = unknownsRisk(e.Path, text)
-	e.Reasons = append(e.Reasons, reasons...)
-	e.EvidenceLocations = append(e.EvidenceLocations, unknownsEvidenceLocations(e.Path, text, reasons)...)
+	if !docOnly {
+		e.UnknownsRisk, reasons = unknownsRisk(e.Path, text)
+		e.Reasons = append(e.Reasons, reasons...)
+		e.EvidenceLocations = append(e.EvidenceLocations, unknownsEvidenceLocations(e.Path, text, reasons)...)
+	}
 	envVars := envVarsInCode(e.Path, text)
 	e.EnvContractRisk, reasons = envContractRisk(envVars, scoreCtx.documentedEnv, e.ChurnAfterCreation, e.FixTouches, e.PathRisk, e.ContentRisk, e.UnknownsRisk)
 	e.Reasons = append(e.Reasons, reasons...)
@@ -864,7 +884,7 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	e.Reasons = append(e.Reasons, reasons...)
 	e.HotspotRisk, reasons = hotspotRisk(branchComplexity(text, e.Path), e.ChurnAfterCreation, e.FixTouches, e.IncomingRefs)
 	e.Reasons = append(e.Reasons, reasons...)
-	if repo != "" && e.Lines >= 80 && !isTestFile(e.Path) && isArchitectureSource(e.Path) && !hasNearbyTest(repo, e.Path) {
+	if repo != "" && e.Lines >= 80 && !isTestFile(e.Path) && !isExamplesPath(e.Path) && !docOnly && isArchitectureSource(e.Path) && !hasNearbyTest(repo, e.Path) {
 		e.TestGap = true
 		e.Reasons = append(e.Reasons, "test_gap:no nearby test")
 	}
