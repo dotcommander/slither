@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Hardened two attribution heuristics found while triaging reliquary. Bug-fix
+  subjects now match on word boundaries (fix/bug/regression/crash/panic/broken
+  plus bugfix/hotfix and common inflections), so subjects like "add nomic task
+  *prefixes*" no longer inflate `fix_touches`; matching is also subject-only,
+  as documented. Go package imports in packages without a `pkg.go`-style owner
+  file are still attributed to the alphabetically first file, but the reason
+  is now labeled `centrality:package_refs:N` instead of
+  `centrality:incoming_refs:N` so package fan-in cannot be misread as resolved
+  file-level dependents; scoring is unchanged.
 - Decomposed churn so review pressure separates from file size: rows now
   carry `commit_touches`, `churn_after_creation` (churn excluding the creation
   commit, identified from full-history add records), and a derived

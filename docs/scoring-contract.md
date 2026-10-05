@@ -29,9 +29,23 @@ churn number, the scorer decomposes it before use:
 
 When creation cannot be identified — renamed files, or creations older than
 available history — all churn counts as post-creation, which overstates
-pressure rather than hiding it. Bug-fix identification keeps its existing
-heuristic (fix/bug/regression/crash/panic/broken subjects, minimum 30 commits
-in the window) and is unaffected.
+pressure rather than hiding it. Bug-fix identification matches fix/bug/
+regression/crash/panic/broken (plus bugfix/hotfix and common inflections) on
+**word boundaries in the commit subject** — "prefixes", "suffix", and
+"fixtures" never count — with the unchanged minimum of 30 commits in the
+window.
+
+## Centrality attribution
+
+Go imports name packages, not files, so each local package import is attributed
+to at most two owner files: the package's `pkg.go`-style name, `types.go`,
+`interfaces.go`, or similar. When a package has no such file, the
+alphabetically first file absorbs the package's fan-in and the reason is
+labeled `centrality:package_refs:N` instead of `centrality:incoming_refs:N`:
+the count is real package-level fan-in, but the file was not resolved as the
+hub — read it as "this package is heavily imported," not "this file has N
+direct dependents." The score contribution is unchanged; only the label
+protects the reading.
 
 ## 2026-07-29 calibration decision
 

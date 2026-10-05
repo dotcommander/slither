@@ -850,7 +850,7 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	e.Reasons = append(e.Reasons, reasons...)
 	e.SDKDXRisk, reasons = sdkDXRisk(e.Path, text)
 	e.Reasons = append(e.Reasons, reasons...)
-	e.CentralityRisk, reasons = centralityRisk(e.IncomingRefs, e.PathRisk, e.ContentRisk)
+	e.CentralityRisk, reasons = centralityRisk(e.IncomingRefs, scoreCtx.packageLevelRefs[e.Path], e.PathRisk, e.ContentRisk)
 	e.Reasons = append(e.Reasons, reasons...)
 	e.CochangeRisk, reasons = cochangeRisk(scoreCtx.cochange[e.Path], e.ChurnAfterCreation, e.FixTouches, e.PathRisk, e.ContentRisk, e.CentralityRisk)
 	e.Reasons = append(e.Reasons, reasons...)

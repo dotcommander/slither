@@ -529,7 +529,12 @@ func envContractRisk(envVars []string, documented map[string]bool, pressure, fix
 	return score, reasons
 }
 
-func centralityRisk(incomingRefs, pathScore, contentScore int) (int, []string) {
+// centralityRisk scores incoming reference counts. When packageLevel is set
+// the count is package fan-in attributed by the ownerless-package fallback:
+// the reason says package_refs so it cannot be misread as resolved file-level
+// dependents; the score contribution is unchanged because any file in a
+// heavily imported package shares that blast-radius context.
+func centralityRisk(incomingRefs int, packageLevel bool, pathScore, contentScore int) (int, []string) {
 	score := 0
 	var reasons []string
 	switch {
@@ -543,7 +548,11 @@ func centralityRisk(incomingRefs, pathScore, contentScore int) (int, []string) {
 	if score == 0 {
 		return 0, nil
 	}
-	reasons = append(reasons, "centrality:incoming_refs:"+itoa(incomingRefs))
+	if packageLevel {
+		reasons = append(reasons, "centrality:package_refs:"+itoa(incomingRefs))
+	} else {
+		reasons = append(reasons, "centrality:incoming_refs:"+itoa(incomingRefs))
+	}
 	if pathScore >= 3 || contentScore >= 6 {
 		score++
 		reasons = append(reasons, "centrality:risk_overlap")

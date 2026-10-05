@@ -20,28 +20,33 @@ const maxGitHistoryBytes int64 = 16 << 20
 var errGitOutputLimit = errors.New("git output exceeded limit")
 
 type scoreContext struct {
-	files         []string
-	churn         map[string]churnStats
-	fixTouches    map[string]int
-	cochange      map[string]cochangeInfo
-	ownership     map[string]ownershipInfo
-	staleMarkers  map[string]staleMarkerInfo
-	incomingRefs  map[string]int
-	localImports  []localImportEdge
-	documentedEnv map[string]bool
-	patterns      scoringPatterns
-	skipped       []string
+	files        []string
+	churn        map[string]churnStats
+	fixTouches   map[string]int
+	cochange     map[string]cochangeInfo
+	ownership    map[string]ownershipInfo
+	staleMarkers map[string]staleMarkerInfo
+	incomingRefs map[string]int
+	// packageLevelRefs marks files whose incoming refs were attributed by
+	// the ownerless-package fallback: the count is real package fan-in, but
+	// the file itself was chosen alphabetically, not as a resolved hub.
+	packageLevelRefs map[string]bool
+	localImports     []localImportEdge
+	documentedEnv    map[string]bool
+	patterns         scoringPatterns
+	skipped          []string
 }
 
 func newScoreContext(ctx context.Context, repo string, files []string, maxBytes int64, days int, asOf time.Time, patterns scoringPatterns) scoreContext {
-	incomingRefs, localImports := localImportGraph(repo, files, maxBytes)
+	incomingRefs, localImports, packageLevelRefs := localImportGraph(repo, files, maxBytes)
 	scoreCtx := scoreContext{
-		files:         files,
-		fixTouches:    map[string]int{},
-		incomingRefs:  incomingRefs,
-		localImports:  localImports,
-		documentedEnv: documentedEnvVars(repo, files, maxBytes),
-		patterns:      patterns,
+		files:            files,
+		fixTouches:       map[string]int{},
+		incomingRefs:     incomingRefs,
+		packageLevelRefs: packageLevelRefs,
+		localImports:     localImports,
+		documentedEnv:    documentedEnvVars(repo, files, maxBytes),
+		patterns:         patterns,
 	}
 	historyWindow := gitHistoryWindow(days, asOf)
 	churn, skip := churnStatsByFile(ctx, repo, historyWindow)
@@ -230,33 +235,36 @@ func numstatPath(field string) string {
 	return strings.ReplaceAll(result, "//", "/")
 }
 
+// bugfixSubjectPattern matches bug-fix subjects on word boundaries so words
+// merely containing a keyword ("prefixes", "fixtures", "suffix") never count.
+var bugfixSubjectPattern = regexp.MustCompile(`(?i)\b(fix(es|ed|ing)?|bug(s)?|bugfix(es)?|hotfix(es)?|regressions?|crash(es|ed|ing)?|panic(s|ked)?|broken)\b`)
+
 func bugfixTouchesByFile(ctx context.Context, repo string, bounds gitHistoryBounds) (map[string]int, string) {
-	historyArgs := append(bounds.args(), "--pretty=format:%H")
-	history, err := runGitOutput(ctx, repo, append([]string{"log"}, historyArgs...)...)
-	if err != nil {
-		return map[string]int{}, gitSkipReason(err)
-	}
-	if history == "" {
-		return map[string]int{}, "no recent git history"
-	}
-	commits := strings.Fields(history)
-	if len(commits) < 30 {
-		return map[string]int{}, "insufficient commit count:" + itoa(len(commits))
-	}
-	bugfixArgs := append(bounds.args(), "--extended-regexp", "--grep=fix|bug|regression|crash|panic|broken", "-i", "--name-only", "--pretty=format:")
-	out, err := runGitOutput(ctx, repo, append([]string{"log"}, bugfixArgs...)...)
+	args := append(bounds.args(), "--format=format:__SLITHER_SUBJECT__%s", "--name-only")
+	out, err := runGitOutput(ctx, repo, append([]string{"log"}, args...)...)
 	if err != nil {
 		return map[string]int{}, gitSkipReason(err)
 	}
 	if out == "" {
-		return map[string]int{}, ""
+		return map[string]int{}, "no recent git history"
 	}
+	commits := 0
 	touches := map[string]int{}
+	isFix := false
 	for _, line := range strings.Split(out, "\n") {
-		rel := strings.TrimSpace(line)
-		if rel != "" {
-			touches[rel]++
+		if subject, ok := strings.CutPrefix(line, "__SLITHER_SUBJECT__"); ok {
+			commits++
+			isFix = bugfixSubjectPattern.MatchString(subject)
+			continue
 		}
+		rel := strings.TrimSpace(line)
+		if rel == "" || !isFix {
+			continue
+		}
+		touches[rel]++
+	}
+	if commits < 30 {
+		return map[string]int{}, "insufficient commit count:" + itoa(commits)
 	}
 	return touches, ""
 }
@@ -477,7 +485,7 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	return stale, ""
 }
 
-func localImportGraph(repo string, files []string, maxBytes int64) (map[string]int, []localImportEdge) {
+func localImportGraph(repo string, files []string, maxBytes int64) (map[string]int, []localImportEdge, map[string]bool) {
 	source := map[string]string{}
 	noExt := map[string]string{}
 	goPackageFiles := map[string][]string{}
@@ -507,6 +515,7 @@ func localImportGraph(repo string, files []string, maxBytes int64) (map[string]i
 		}
 	}
 	counts := map[string]int{}
+	packageLevel := map[string]bool{}
 	for rel := range source {
 		counts[rel] = 0
 	}
@@ -525,9 +534,13 @@ func localImportGraph(repo string, files []string, maxBytes int64) (map[string]i
 			}
 		}
 		for _, spec := range goImportSpecs(text) {
-			for _, target := range resolveGoImportPackage(importer, spec, modulePath, goPackageFiles) {
+			targets, fallback := resolveGoImportPackage(importer, spec, modulePath, goPackageFiles)
+			for _, target := range targets {
 				if target != importer {
 					resolved[target] = "go_package"
+					if fallback {
+						packageLevel[target] = true
+					}
 				}
 			}
 		}
@@ -545,7 +558,7 @@ func localImportGraph(repo string, files []string, maxBytes int64) (map[string]i
 		}
 		return edges[i].Kind < edges[j].Kind
 	})
-	return counts, edges
+	return counts, edges, packageLevel
 }
 
 func goModulePath(repo string) string {
@@ -585,35 +598,39 @@ func goImportSpecs(text string) []string {
 	return specs
 }
 
-func resolveGoImportPackage(importer, spec, modulePath string, goPackageFiles map[string][]string) []string {
+func resolveGoImportPackage(importer, spec, modulePath string, goPackageFiles map[string][]string) ([]string, bool) {
 	if modulePath == "" {
-		return nil
+		return nil, false
 	}
 	if spec == modulePath {
-		return goPackageFiles[""]
+		return goPackageOwnerFiles("", goPackageFiles[""])
 	}
 	prefix := modulePath + "/"
 	if !strings.HasPrefix(spec, prefix) {
-		return nil
+		return nil, false
 	}
 	dir := strings.TrimPrefix(spec, prefix)
 	targets := goPackageFiles[dir]
 	if len(targets) == 0 {
-		return nil
+		return nil, false
 	}
 	importerDir := filepath.Dir(filepath.ToSlash(importer))
 	if importerDir == "." {
 		importerDir = ""
 	}
 	if importerDir == dir {
-		return nil
+		return nil, false
 	}
 	return goPackageOwnerFiles(dir, targets)
 }
 
-func goPackageOwnerFiles(dir string, files []string) []string {
+// goPackageOwnerFiles picks at most two owner files for a package import. A
+// named owner match (pkg.go, types.go, interfaces.go, ...) resolves the hub;
+// when no preferred name exists the alphabetically first file absorbs the
+// package fan-in and the caller must label that attribution package-level.
+func goPackageOwnerFiles(dir string, files []string) ([]string, bool) {
 	if len(files) <= 1 {
-		return files
+		return files, false
 	}
 	base := filepath.Base(dir)
 	singular := strings.TrimSuffix(base, "s")
@@ -639,14 +656,14 @@ func goPackageOwnerFiles(dir string, files []string) []string {
 			owners = append(owners, rel)
 		}
 		if len(owners) == 2 {
-			return owners
+			return owners, false
 		}
 	}
 	if len(owners) > 0 {
-		return owners
+		return owners, false
 	}
 	sort.Strings(files)
-	return files[:1]
+	return files[:1], true
 }
 
 func resolveLocalImport(importer, spec string, counts map[string]int, noExt map[string]string) string {
