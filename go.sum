@@ -1,5 +1,9 @@
 github.com/dlclark/regexp2 v1.12.0 h1:0j4c5qQmnC6XOWNjP3PIXURXN2gWx76rd3KvgdPkCz8=
 github.com/dlclark/regexp2 v1.12.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
+github.com/dotcommander/verdict v0.1.0 h1:4qmgFB5/IUAyCIQ0uusOwM3Qzdbc6+kWAd5AavUxjeY=
+github.com/dotcommander/verdict v0.1.0/go.mod h1:bDx3hOLokUJhysFD/h1rTXPzkIrv7FxlUZIsFYoBEqI=
+github.com/garyblankenship/wormhole/v3 v3.0.2 h1:u21TjXaWJDT8pI4siJ74k8RNF6K5PLg6m5zz+d1O5bM=
+github.com/garyblankenship/wormhole/v3 v3.0.2/go.mod h1:/gP3drjNWrC3ItuJIFh2ww9OBKqnn9QG0QJjoqe8z8Y=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/stretchr/testify v1.12.0 h1:K6Mr6jO9JICuend/5xzTM03ydSV3vdNRYAdPSukj8uI=

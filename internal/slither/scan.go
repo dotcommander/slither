@@ -26,6 +26,10 @@ var skipDirs = map[string]bool{
 
 var skipSuffixes = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".tar", ".mp4", ".mp3", ".lock", ".sum"}
 
+// markerPattern is compiled once because scoreFile runs it against every
+// scanned file.
+var markerPattern = regexp.MustCompile(`\b(TODO|FIXME|HACK|XXX)\b`)
+
 const maxInspectWorkers = 16
 
 var errFileUnreadable = errors.New("file vanished or unreadable")
@@ -806,7 +810,7 @@ func scoreFile(repo, text string, e *FileEvidence, scoreCtx scoreContext) {
 	e.Churn = scoreCtx.churn[e.Path]
 	e.FixTouches = scoreCtx.fixTouches[e.Path]
 	e.IncomingRefs = scoreCtx.incomingRefs[e.Path]
-	e.Markers = len(regexpMust(`\b(TODO|FIXME|HACK|XXX)\b`).FindAllStringIndex(text, -1))
+	e.Markers = len(markerPattern.FindAllStringIndex(text, -1))
 
 	var reasons []string
 	e.PathRisk, reasons = pathRisk(scoreCtx.patterns, e.Path)
