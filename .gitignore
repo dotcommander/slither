@@ -10,8 +10,10 @@
 /.claude/
 
 # Generated reports
-slither-report.md
+slither-report.*
 *-report.md
+slither-summary.*
+slither-cull*
 /docs/slither.md
 
 # Go

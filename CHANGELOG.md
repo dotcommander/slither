@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Two closure fixes from a live dogfood run of the tool on its own repo. The
+  `--summary` Markdown "Ranking health" line now names its basis — observed:
+  it read `distinct scores 1, saturation 0.93` directly above a Start Here
+  queue visibly spanning scores 5/4/3, because the metric deliberately
+  measures the top 15 of the full rows array (eval `top_k_score_saturation`
+  parity), which in test-heavy repos is dominated by separated test rows
+  (24 files tied at score 5 here); it now reads "top-15 of all reported rows,
+  separated test/doc included", and docs/usage.md documents the
+  `slither.summary/v1` `ranking_health` basis. The repo `.gitignore` now
+  covers the tool's own documented default outputs (`slither-report.*`,
+  `slither-summary.*`, `slither-cull*`, matching the discovery-layer
+  exclusion set), so default `--summary`/`--json`/`--cull` runs no longer
+  leave untracked report noise in `git status`.
 - Three hygiene fixes from the second reliquary triage pass. Documentation-
   only files (≤3 code lines after comment stripping, ≥10 non-blank lines) no
   longer score content/unknowns patterns — observed `vector/doc.go`, a pure

@@ -403,6 +403,18 @@ Markdown. Top-level fields:
 | `review_plan` | object[] | Review lanes; each has `id`, `lane`, `group`, `files`, `gates`, `verify`, `why`, `confidence`, `caveat` (omitted when empty). |
 | `cull_ledger` | object | Cull ledger, present when culling is enabled via `--cull`: which files were kept, demoted to alternates, or culled, with bucketed reasons and `actionability` on examples (omitted otherwise). |
 
+### Summary ranking health (`--summary`)
+
+`slither.summary/v1` carries a `ranking_health` object. Its top-k fields
+(`slots`, `distinct_top_k_scores`, `saturation`) use the same definition as
+eval's `top_k_score_saturation`: the first 15 rows of the report's full
+`rows` array in report order — including the separated test/fixture and
+documentation rows that the Markdown ranked queue omits. A repository whose
+top band is dominated by test files can therefore show near-total saturation
+(`distinct_top_k_scores` of 1) while the ranked production queue — the
+"Start Here" list — still discriminates across several scores. The Markdown
+summary labels the line with this basis for the same reason.
+
 ## Scan behavior
 
 These limits and heuristics are fixed in the scanner (not flags):
