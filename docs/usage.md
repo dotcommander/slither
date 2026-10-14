@@ -50,6 +50,7 @@ slither eval --outcomes path --report path [--report path...] (--json|--markdown
 | `--base-url` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL. |
 | `--api-key-env` | `OPENROUTER_API_KEY` | Environment variable holding the API key. |
 | `--local` | `false` | Use the local model profile (see below). |
+| `--jev` | `false` | Score the top band one file at a time through the Jev typed-verdict endpoint (see below). Mutually exclusive with `--local`. |
 | `--json` | `false` | Emit a machine-readable JSON evidence envelope. |
 | `--summary` | `false` | Emit a concise Markdown summary; with `--json`, emits `slither.summary/v1`. When `--out` is omitted, defaults become `slither-summary.md` or `slither-summary.json`; an explicit `--out slither-report.md` is preserved. |
 | `--cull` | `false` | Append a cheap-model cull ledger over reported rows. |
@@ -123,6 +124,27 @@ go run ./cmd/slither report /path/to/repo --local --out slither-report.md
 `--local` uses the `local` profile from the config file — by default model
 `Qwen3.6-35B-A3B-oQ4-fp16-mtp`, base URL `http://127.0.0.1:8000/v1`, and API key
 env var `SLITHER_API_KEY` — unless you override each explicitly.
+
+Score with the Jev typed-verdict endpoint:
+
+```bash
+go run ./cmd/slither report /path/to/repo --jev --model <jev-model-id> --out slither-report.md
+```
+
+`--jev` uses the `jev` profile from the config file — by default base URL
+`https://api.typesafe.ai/v1/systemone` and API key env var `TYPESAFE_API_KEY` —
+sending one verdict call per file that returns a structured 1–5 level instead
+of free prose. The profile's default `model` is empty, so `--jev` without a
+configured `jev.model` (or an explicit `--model`) stays deterministic.
+`--jev` and `--local` are mutually exclusive.
+
+OpenRouter serves the same Jev Decisions API at
+`https://openrouter.ai/api/alpha/decisions` (documented in wormhole's
+OpenRouter provider notes), so an OpenRouter key works without a TypeSafe
+credential: pass `--model typesafe/jev-1.13` (or the `~typesafe/jev-latest`
+pass-through alias), `--base-url https://openrouter.ai/api/alpha/decisions`,
+and `--api-key-env OPENROUTER_API_KEY`. The `/v1/systemone` path with model
+`jev-latest` answers the same protocol.
 
 ## Configuration file
 

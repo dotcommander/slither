@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Two Jev documentation gaps found while exercising the scoring surfaces.
+  `docs/usage.md`'s report flag table now includes `--jev` with a matching
+  "Score with the Jev typed-verdict endpoint" example section — the flag was
+  shipped but absent from the table that README designates as the full flag
+  reference. The README Jev example now passes `--model <jev-model-id>` and
+  states that the profile's default `model` is empty — observed: with a fresh
+  config, `slither report . --jev` alone silently produced a deterministic
+  report (no model fields, ranking identical to offline scoring), while the
+  example implied it exercised the Jev endpoint. Both docs now also record
+  that OpenRouter serves the Jev Decisions API directly at
+  `https://openrouter.ai/api/alpha/decisions` (per wormhole's OpenRouter
+  provider notes), so an OpenRouter key suffices without a TypeSafe credential
+  — verified end-to-end through slither with `typesafe/jev-1.13` (104/104
+  rows scored, zero errors, cache warm on rerun).
+
 - Three documentation corrections from a dependency-refresh dogfood run
   (rebuild after `wormhole/v3 v3.0.2 → v3.2.0`, then the documented first-use
   and local model-scoring workflows). The README "Verification" section no

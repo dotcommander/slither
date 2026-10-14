@@ -117,10 +117,18 @@ A local OpenAI-compatible server using the `local` profile above (source-checked
 slither report . --local --out slither-report.md
 ```
 
-Jev scoring sends the top band one file at a time through the typed-verdict endpoint in the `jev` profile — a judgment client that returns a structured 1–5 level instead of free prose — rather than wormhole's batch prompt (source-checked, not executed):
+Jev scoring sends the top band one file at a time through the typed-verdict endpoint in the `jev` profile — a judgment client that returns a structured 1–5 level instead of free prose — rather than wormhole's batch prompt (source-checked, not executed). The profile's default `model` is empty, so pass `--model` (or set `jev.model` in the config) — `--jev` alone stays deterministic:
 
 ```bash
-TYPESAFE_API_KEY=… slither report . --jev --out slither-report.md
+TYPESAFE_API_KEY=… slither report . --jev --model <jev-model-id> --out slither-report.md
+```
+
+OpenRouter also serves the Jev Decisions API directly (see wormhole's OpenRouter provider notes), so an OpenRouter key works without a TypeSafe credential:
+
+```bash
+OPENROUTER_API_KEY=… slither report . --jev --model typesafe/jev-1.13 \
+  --base-url https://openrouter.ai/api/alpha/decisions --api-key-env OPENROUTER_API_KEY \
+  --out slither-report.md
 ```
 
 `--jev` and `--local` are mutually exclusive. The published v0.3.0 release installed by `go install …@latest` predates `--jev`; build this checkout (see [Verification](#verification)) to use it.
