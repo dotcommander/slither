@@ -156,7 +156,7 @@ Expected result: one deterministic `slither.eval/v1` JSON object with matched ou
 
 ### Readiness and shell surfaces
 
-- `slither doctor [--json]` — read-only readiness: config state, model mode, key presence, and a loopback-only preflight of the configured local model. Warnings exit successfully.
+- `slither doctor [--json]` — read-only readiness: config state, model mode, key presence, and a loopback-only preflight of the configured model endpoint (sent only when that endpoint resolves to loopback; the `local` profile is not prefetched). Warnings exit successfully.
 - `slither outputs [surface] [--json]` — catalog of every output surface with its schema, privacy, and flags.
 - `slither completion bash|zsh` — dependency-free completion script (source-checked, not executed): `source <(slither completion bash)`.
 - `slither version [--build|--json]` — build provenance; `--json` emits `slither.version/v1`.
@@ -173,7 +173,7 @@ go vet ./...
 
 Build a binary with `go build -o slither ./cmd/slither`.
 
-Two workspace facts shape building this checkout. First, `go.mod` replaces `github.com/garyblankenship/wormhole/v3` with the sibling path `../wormhole` and `github.com/dotcommander/verdict` with `../../dotcommander/verdict`, so a bare Git clone fails to build (`replacement directory ../wormhole does not exist`); both sibling checkouts must be present at those relative paths. Second, if a parent Go workspace (`go.work`) does not include this module, prefix Go commands with `GOWORK=off`. Use `go install github.com/dotcommander/slither/cmd/slither@latest` to install the published release instead; it resolves its dependencies from the module proxy.
+One workspace fact shapes building this checkout: if a parent Go workspace (`go.work`) does not include this module, prefix Go commands with `GOWORK=off`. Dependencies resolve from published module versions — `go.mod` has no local `replace` directives — so the checkout builds without sibling checkouts. Use `go install github.com/dotcommander/slither/cmd/slither@latest` to install the published release instead; it resolves its dependencies from the module proxy.
 
 License: MIT ([LICENSE](LICENSE)). Release notes: [CHANGELOG.md](CHANGELOG.md).
 

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Three documentation corrections from a dependency-refresh dogfood run
+  (rebuild after `wormhole/v3 v3.0.2 → v3.2.0`, then the documented first-use
+  and local model-scoring workflows). The README "Verification" section no
+  longer claims `go.mod` carries sibling-path `replace` directives — they were
+  removed when the module moved to published dependency versions, so the
+  checkout builds without sibling checkouts (observed: this session's
+  `go get`/`go build` resolved everything from published versions). The
+  `doctor` bullet now says the loopback-only preflight targets the configured
+  model endpoint and that the `local` profile is not prefetched — observed:
+  `doctor` reported `not_configured` while a local server was listening and
+  the profile was configured, because the code prefights only the top-level
+  `base_url`. The usage "Score cache" bullet now states that rows the model
+  failed or omitted are never cached and are retried on the next run —
+  observed: a small local model scored ~30% of rows validly, so each rerun
+  re-paid calls for the failed remainder while `cache_stats` confirmed hits
+  only for the valid subset.
 - Two closure fixes from a live dogfood run of the tool on its own repo. The
   `--summary` Markdown "Ranking health" line now names its basis — observed:
   it read `distinct scores 1, saturation 0.93` directly above a Start Here

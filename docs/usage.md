@@ -151,8 +151,10 @@ flags or editing source:
 - **`fallback_models`:** ordered backup model IDs; if the primary is rate-limited
   or over quota, wormhole fails over to the next. Ignored under `--local`.
 - **Score cache:** model scores are cached at `~/.config/slither/cache/scores.json`,
-  keyed by file evidence + model, so re-runs skip unchanged files. Pass `--no-cache`
-  to disable. A missing or corrupt cache is ignored, never fatal. New cache and
+  keyed by file evidence + model, so re-runs skip unchanged files that already
+  have a valid model score — rows the model failed or omitted are never cached
+  and are retried on the next run. Pass `--no-cache` to disable. A missing or
+  corrupt cache is ignored, never fatal. New cache and
   report files are owner-readable only (`0600`); replacing an existing file never
   broadens stricter permissions.
 
