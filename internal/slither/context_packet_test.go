@@ -15,6 +15,53 @@ import (
 	"unicode/utf8"
 )
 
+func TestReplaceComponentOmissionsMatchesSortedPacketReference(t *testing.T) {
+	t.Parallel()
+	plan := contextComponentPlan{targetID: "é:<&>", kind: "target", row: FileEvidence{ID: "a"}}
+	other := contextComponentPlan{targetID: "é:<&>", kind: "target", row: FileEvidence{ID: "a:neighbor"}}
+	prefix := "target:" + plan.targetID + ":component:" + plan.kind + ":" + plan.row.ID + ":"
+	oldReplace := func(omissions []string, replacements []string) []string {
+		out := make([]string, 0, len(omissions)+len(replacements))
+		for _, omission := range omissions {
+			if !strings.HasPrefix(omission, prefix) {
+				out = append(out, omission)
+			}
+		}
+		out = append(out, replacements...)
+		sort.Strings(out)
+		return out
+	}
+	current := []string{"before", contextBudgetOmission(plan), contextSourceTruncatedOmission(plan), contextBudgetOmission(plan), contextBudgetOmission(other), "after"}
+	sort.Strings(current)
+	packet := ContextPacket{Schema: contextPacketSchema, ReportID: "é<>&\\\"", BudgetBytes: 4096, Targets: []ContextPacketTarget{{ID: "a", Components: []ContextComponent{{Kind: "target", Text: "é<>&\\\"\\n"}}}}, Omissions: []string{}}
+	for _, replacements := range [][]string{
+		{contextSourceTruncatedOmission(plan), contextBudgetOmission(plan)},
+		{contextUnavailableOmission(plan)},
+		nil,
+		{contextBudgetOmission(plan), "before", "z\\\né"},
+	} {
+		want := oldReplace(current, replacements)
+		got := replaceComponentOmissions(current, plan, replacements)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("omissions = %#v, want %#v", got, want)
+		}
+		packet.Omissions = got
+		actual, actualBytes, err := encodeContextPacket(packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packet.Omissions = want
+		expected, expectedBytes, err := encodeContextPacket(packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(actualBytes, expectedBytes) || actual.UsedBytes != expected.UsedBytes {
+			t.Fatalf("packet bytes = %q (used %d), want %q (used %d)", actualBytes, actual.UsedBytes, expectedBytes, expected.UsedBytes)
+		}
+		current = got
+	}
+}
+
 func TestBuildContextPacketSelectionFocusAndDefault(t *testing.T) {
 	repo := t.TempDir()
 	writeContextFile(t, repo, "a.go", "package fixture\nfunc A() {}\n")

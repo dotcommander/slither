@@ -63,8 +63,9 @@ type evalWarnings struct {
 }
 
 type evalReport struct {
-	ID   string
-	Rows []evalRow
+	ID            string
+	Rows          []evalRow
+	rowByEvidence map[string]int
 }
 
 type evalRow struct {
@@ -132,14 +133,8 @@ func applyOutcomeRecord(result *evalResult, reports map[string]evalReport, recor
 	if !ok {
 		return addUnmatchedOutcome(result, record)
 	}
-	rowIndex := -1
-	for index, candidate := range report.Rows {
-		if candidate.Row.EvidenceID == record.EvidenceID {
-			rowIndex = index
-			break
-		}
-	}
-	if rowIndex < 0 {
+	rowIndex, found := report.rowByEvidence[record.EvidenceID]
+	if !found {
 		return addUnmatchedOutcome(result, record)
 	}
 	row := report.Rows[rowIndex]
@@ -212,19 +207,21 @@ func readEvalReport(path string) (evalReport, error) {
 	if err := json.Unmarshal(envelope.Rows, &rawRows); err != nil || rawRows == nil {
 		return evalReport{}, fmt.Errorf("invalid report rows in %s", filepath.Base(path))
 	}
-	report := evalReport{ID: envelope.ReportID, Rows: make([]evalRow, 0, len(rawRows))}
+	report := evalReport{ID: envelope.ReportID, Rows: make([]evalRow, 0, len(rawRows)), rowByEvidence: make(map[string]int, len(rawRows))}
 	identityReport := Report{SchemaVersion: envelope.SchemaVersion, SourceState: envelope.SourceState, Parameters: envelope.Parameters, Rows: make([]FileEvidence, 0, len(rawRows))}
-	seen := make(map[string]bool, len(rawRows))
 	for index, raw := range rawRows {
 		var required struct {
 			EvidenceID string `json:"evidence_id"`
 			Score      *int   `json:"score"`
 		}
 		var row FileEvidence
-		if err := json.Unmarshal(raw, &required); err != nil || json.Unmarshal(raw, &row) != nil || !validOutcomeIdentity(required.EvidenceID) || required.Score == nil || *required.Score < 1 || *required.Score > 5 || seen[required.EvidenceID] || !validEvalProvenance(row) {
+		if err := json.Unmarshal(raw, &required); err != nil || json.Unmarshal(raw, &row) != nil || !validOutcomeIdentity(required.EvidenceID) || required.Score == nil || *required.Score < 1 || *required.Score > 5 || !validEvalProvenance(row) {
 			return evalReport{}, fmt.Errorf("invalid report row %d in %s", index+1, filepath.Base(path))
 		}
-		seen[required.EvidenceID] = true
+		if _, duplicate := report.rowByEvidence[required.EvidenceID]; duplicate {
+			return evalReport{}, fmt.Errorf("invalid report row %d in %s", index+1, filepath.Base(path))
+		}
+		report.rowByEvidence[required.EvidenceID] = index
 		report.Rows = append(report.Rows, evalRow{Row: row})
 		identityReport.Rows = append(identityReport.Rows, row)
 	}

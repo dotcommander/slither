@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.4.0 (2026-10-31)
+
+- Added optional Jev typed-verdict scoring with separate cache identities and
+  deterministic fallback on provider errors. Configure a Jev model explicitly;
+  `--jev` and `--local` cannot be combined.
+- Reused bounded source prefixes within each report, combined overlapping Git
+  history queries, batched stale-marker blame, indexed evaluation evidence, and
+  merged context omissions without repeatedly sorting the full packet.
+  Regression tests cover retained output and failure behavior.
+- Release builds can embed their version with `-ldflags -X` while retaining
+  module and VCS build provenance.
+
 - Two Jev documentation gaps found while exercising the scoring surfaces.
   `docs/usage.md`'s report flag table now includes `--jev` with a matching
   "Score with the Jev typed-verdict endpoint" example section — the flag was

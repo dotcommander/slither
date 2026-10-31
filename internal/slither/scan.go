@@ -690,7 +690,11 @@ func inspectFile(repo, path string, maxBytes int64, scoreCtx scoreContext) (File
 	if !info.Mode().IsRegular() {
 		return FileEvidence{}, false, nil
 	}
-	text, ok, truncated, err := sourcePrefixReader(path, maxBytes)
+	read := prefixReader(sourcePrefixReader)
+	if scoreCtx.sources != nil {
+		read = scoreCtx.sources.read
+	}
+	text, ok, truncated, err := read(path, maxBytes)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return FileEvidence{}, false, errFileUnreadable

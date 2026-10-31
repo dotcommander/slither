@@ -10,6 +10,9 @@ type BuildInfo struct {
 	GoVersion string `json:"go_version,omitempty"`
 }
 
+// releaseVersion is supplied by release builds with -ldflags -X.
+var releaseVersion string
+
 func CurrentBuildInfo() BuildInfo {
 	info := BuildInfo{Version: "devel"}
 	if build, ok := debug.ReadBuildInfo(); ok {
@@ -26,6 +29,9 @@ func CurrentBuildInfo() BuildInfo {
 				info.Modified = setting.Value == "true"
 			}
 		}
+	}
+	if releaseVersion != "" {
+		info.Version = releaseVersion
 	}
 	return info
 }

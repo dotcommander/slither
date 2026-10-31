@@ -35,17 +35,19 @@ type scoreContext struct {
 	documentedEnv    map[string]bool
 	patterns         scoringPatterns
 	skipped          []string
+	sources          *reportSources
 }
 
 func newScoreContext(ctx context.Context, repo string, files []string, maxBytes int64, days int, asOf time.Time, patterns scoringPatterns) scoreContext {
-	incomingRefs, localImports, packageLevelRefs := localImportGraph(repo, files, maxBytes)
+	sources := newReportSources()
+	incomingRefs, localImports, packageLevelRefs := localImportGraphWithReader(repo, files, maxBytes, sources.read)
 	scoreCtx := scoreContext{
 		files:            files,
 		fixTouches:       map[string]int{},
 		incomingRefs:     incomingRefs,
 		packageLevelRefs: packageLevelRefs,
 		localImports:     localImports,
-		documentedEnv:    documentedEnvVars(repo, files, maxBytes),
+		documentedEnv:    documentedEnvVarsWithReader(repo, files, maxBytes, sources.read),
 		patterns:         patterns,
 	}
 	historyWindow := gitHistoryWindow(days, asOf)
@@ -54,26 +56,25 @@ func newScoreContext(ctx context.Context, repo string, files []string, maxBytes 
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "churn:"+skip)
 	}
-	fixTouches, skip := bugfixTouchesByFile(ctx, repo, historyWindow)
-	scoreCtx.fixTouches = fixTouches
-	if skip != "" {
-		scoreCtx.skipped = append(scoreCtx.skipped, "bugfix_density:"+skip)
+	otherHistory := combinedHistory(ctx, repo, historyWindow)
+	scoreCtx.fixTouches = otherHistory.fixTouches
+	if otherHistory.fixSkip != "" {
+		scoreCtx.skipped = append(scoreCtx.skipped, "bugfix_density:"+otherHistory.fixSkip)
 	}
-	cochange, skip := cochangeByFile(ctx, repo, historyWindow)
-	scoreCtx.cochange = cochange
-	if skip != "" {
-		scoreCtx.skipped = append(scoreCtx.skipped, "cochange:"+skip)
+	scoreCtx.cochange = otherHistory.cochange
+	if otherHistory.cochangeSkip != "" {
+		scoreCtx.skipped = append(scoreCtx.skipped, "cochange:"+otherHistory.cochangeSkip)
 	}
-	ownership, skip := ownershipByFile(ctx, repo, historyWindow)
-	scoreCtx.ownership = ownership
-	if skip != "" {
-		scoreCtx.skipped = append(scoreCtx.skipped, "ownership:"+skip)
+	scoreCtx.ownership = otherHistory.ownership
+	if otherHistory.ownershipSkip != "" {
+		scoreCtx.skipped = append(scoreCtx.skipped, "ownership:"+otherHistory.ownershipSkip)
 	}
-	staleMarkers, skip := staleMarkersByFile(ctx, repo, files, maxBytes, asOf)
+	staleMarkers, skip := staleMarkersByFileWithReader(ctx, repo, files, maxBytes, asOf, sources.read)
 	scoreCtx.staleMarkers = staleMarkers
 	if skip != "" {
 		scoreCtx.skipped = append(scoreCtx.skipped, "stale_markers:"+skip)
 	}
+	scoreCtx.sources = sources
 	return scoreCtx
 }
 
@@ -411,6 +412,10 @@ func uniqueIncludedFiles(files []string) []string {
 }
 
 func staleMarkersByFile(ctx context.Context, repo string, files []string, maxBytes int64, asOf time.Time) (map[string]staleMarkerInfo, string) {
+	return staleMarkersByFileWithReader(ctx, repo, files, maxBytes, asOf, sourcePrefixReader)
+}
+
+func staleMarkersByFileWithReader(ctx context.Context, repo string, files []string, maxBytes int64, asOf time.Time, read prefixReader) (map[string]staleMarkerInfo, string) {
 	markers := [][2]string{}
 	for _, path := range files {
 		if len(markers) >= 200 {
@@ -420,8 +425,8 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 		if !ok || shouldSkip(rel) || !isArchitectureSource(rel) {
 			continue
 		}
-		text, ok, _ := readTextPrefix(path, maxBytes)
-		if !ok {
+		text, ok, _, err := read(path, maxBytes)
+		if err != nil || !ok {
 			continue
 		}
 		for lineNumber, line := range strings.Split(text, "\n") {
@@ -437,44 +442,71 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	if len(markers) == 0 {
 		return map[string]staleMarkerInfo{}, ""
 	}
-	today := asOf
+	// Keep file order stable while blaming only selected marker lines. Each
+	// command and its porcelain output stay bounded even for large files.
+	byFile := map[string][]int{}
+	var fileOrder []string
+	for _, marker := range markers {
+		if _, exists := byFile[marker[0]]; !exists {
+			fileOrder = append(fileOrder, marker[0])
+		}
+		line, _ := strconv.Atoi(marker[1])
+		byFile[marker[0]] = append(byFile[marker[0]], line)
+	}
 	stale := map[string]staleMarkerInfo{}
 	blameFailures := 0
 	blameFailureReason := ""
-	for _, marker := range markers {
-		rel, line := marker[0], marker[1]
-		out, err := runGitOutput(ctx, repo, "blame", "--line-porcelain", "-L", line+","+line, "--", rel)
-		if err != nil {
-			blameFailures++
-			if blameFailureReason == "" {
+	for _, rel := range fileOrder {
+		lines := byFile[rel]
+		for start := 0; start < len(lines); start += 32 {
+			batch := lines[start:min(start+32, len(lines))]
+			args := []string{"blame", "--line-porcelain"}
+			for _, line := range batch {
+				selected := itoa(line)
+				args = append(args, "-L", selected+","+selected)
+			}
+			args = append(args, "--", rel)
+			out, err := runGitOutput(ctx, repo, args...)
+			authorTimes := map[int]int64{}
+			if err == nil {
+				authorTimes = markerBlameTimes(out)
+			} else if ctx.Err() == nil {
+				// Isolate failures (for example an invalid line in a changed
+				// file) so other selected markers retain their evidence.
+				for _, line := range batch {
+					selected := itoa(line)
+					one, oneErr := runGitOutput(ctx, repo, "blame", "--line-porcelain", "-L", selected+","+selected, "--", rel)
+					if oneErr != nil {
+						if blameFailureReason == "" {
+							blameFailureReason = gitSkipReason(oneErr)
+						}
+						continue
+					}
+					if seconds, ok := markerBlameTimes(one)[line]; ok {
+						authorTimes[line] = seconds
+					}
+				}
+			} else if blameFailureReason == "" {
 				blameFailureReason = gitSkipReason(err)
 			}
-			continue
+			for _, line := range batch {
+				seconds, ok := authorTimes[line]
+				if !ok {
+					blameFailures++
+					continue
+				}
+				ageDays := int(asOf.Sub(time.Unix(seconds, 0)).Hours() / 24)
+				if ageDays < 180 {
+					continue
+				}
+				info := stale[rel]
+				info.StaleCount++
+				if ageDays > info.OldestDays {
+					info.OldestDays = ageDays
+				}
+				stale[rel] = info
+			}
 		}
-		if out == "" {
-			blameFailures++
-			continue
-		}
-		match := regexpMust(`(?m)^author-time\s+(\d+)$`).FindStringSubmatch(out)
-		if len(match) < 2 {
-			blameFailures++
-			continue
-		}
-		seconds, err := strconv.ParseInt(match[1], 10, 64)
-		if err != nil {
-			blameFailures++
-			continue
-		}
-		ageDays := int(today.Sub(time.Unix(seconds, 0)).Hours() / 24)
-		if ageDays < 180 {
-			continue
-		}
-		info := stale[rel]
-		info.StaleCount++
-		if ageDays > info.OldestDays {
-			info.OldestDays = ageDays
-		}
-		stale[rel] = info
 	}
 	if blameFailures > 0 {
 		if blameFailureReason != "" {
@@ -485,7 +517,37 @@ func staleMarkersByFile(ctx context.Context, repo string, files []string, maxByt
 	return stale, ""
 }
 
+// markerBlameTimes associates each porcelain author-time with its final line
+// number; commit hashes can repeat, so the header rather than hash is the key.
+func markerBlameTimes(out string) map[int]int64 {
+	times := map[int]int64{}
+	lineNumber := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "\t") {
+			lineNumber = 0
+			continue
+		}
+		fields := strings.Fields(line)
+		if (len(fields) == 3 || len(fields) == 4) && len(fields[0]) >= 40 {
+			if _, valid := commitHashLine(fields[0]); valid {
+				lineNumber, _ = strconv.Atoi(fields[2])
+				continue
+			}
+		}
+		if lineNumber > 0 && len(fields) == 2 && fields[0] == "author-time" {
+			if seconds, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+				times[lineNumber] = seconds
+			}
+		}
+	}
+	return times
+}
+
 func localImportGraph(repo string, files []string, maxBytes int64) (map[string]int, []localImportEdge, map[string]bool) {
+	return localImportGraphWithReader(repo, files, maxBytes, sourcePrefixReader)
+}
+
+func localImportGraphWithReader(repo string, files []string, maxBytes int64, read prefixReader) (map[string]int, []localImportEdge, map[string]bool) {
 	source := map[string]string{}
 	noExt := map[string]string{}
 	goPackageFiles := map[string][]string{}
@@ -519,11 +581,11 @@ func localImportGraph(repo string, files []string, maxBytes int64) (map[string]i
 	for rel := range source {
 		counts[rel] = 0
 	}
-	modulePath := goModulePath(repo)
+	modulePath := goModulePathWithReader(repo, read)
 	var edges []localImportEdge
 	for importer, path := range source {
-		text, ok, _ := readTextPrefix(path, maxBytes)
-		if !ok {
+		text, ok, _, err := read(path, maxBytes)
+		if err != nil || !ok {
 			continue
 		}
 		resolved := map[string]string{}
@@ -562,7 +624,11 @@ func localImportGraph(repo string, files []string, maxBytes int64) (map[string]i
 }
 
 func goModulePath(repo string) string {
-	text, ok, truncated, err := sourcePrefixReader(filepath.Join(repo, "go.mod"), maxRepoManifestBytes)
+	return goModulePathWithReader(repo, sourcePrefixReader)
+}
+
+func goModulePathWithReader(repo string, read prefixReader) string {
+	text, ok, truncated, err := read(filepath.Join(repo, "go.mod"), maxRepoManifestBytes)
 	if err != nil || !ok || truncated {
 		return ""
 	}
@@ -688,14 +754,18 @@ func resolveLocalImport(importer, spec string, counts map[string]int, noExt map[
 }
 
 func documentedEnvVars(repo string, files []string, maxBytes int64) map[string]bool {
+	return documentedEnvVarsWithReader(repo, files, maxBytes, sourcePrefixReader)
+}
+
+func documentedEnvVarsWithReader(repo string, files []string, maxBytes int64, read prefixReader) map[string]bool {
 	documented := map[string]bool{}
 	for _, path := range files {
 		rel, ok := relPath(repo, path)
 		if !ok || shouldSkip(rel) || !isEnvContractDocPath(rel) {
 			continue
 		}
-		text, ok, _ := readTextPrefix(path, maxBytes)
-		if !ok {
+		text, ok, _, err := read(path, maxBytes)
+		if err != nil || !ok {
 			continue
 		}
 		for _, env := range regexp.MustCompile(`\b[A-Z][A-Z0-9_]{2,}\b`).FindAllString(text, -1) {

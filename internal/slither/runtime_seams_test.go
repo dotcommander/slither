@@ -163,8 +163,8 @@ func TestSourceReaderSeamRoutesInspectionAndScoreContextReads(t *testing.T) {
 	if _, err := BuildReport(context.Background(), Options{Repo: repo, Top: 10, MaxBytes: 1 << 10}); err != nil {
 		t.Fatal(err)
 	}
-	if got := reads.Load(); got < 7 {
-		t.Fatalf("sourcePrefixReader calls = %d, want inspection plus score-context reads", got)
+	if got := reads.Load(); got < 4 || got > 6 {
+		t.Fatalf("sourcePrefixReader calls = %d, want bounded report-local reuse (4–6 reads)", got)
 	}
 }
 

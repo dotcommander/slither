@@ -131,7 +131,7 @@ OPENROUTER_API_KEY=… slither report . --jev --model typesafe/jev-1.13 \
   --out slither-report.md
 ```
 
-`--jev` and `--local` are mutually exclusive. The published v0.3.0 release installed by `go install …@latest` predates `--jev`; build this checkout (see [Verification](#verification)) to use it.
+`--jev` and `--local` are mutually exclusive. Jev scoring is available starting with v0.4.0; install that release or build this checkout (see [Verification](#verification)).
 
 ### Agent bridge
 

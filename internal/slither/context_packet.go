@@ -532,15 +532,26 @@ func contextUnavailableOmission(plan contextComponentPlan) string {
 
 func replaceComponentOmissions(omissions []string, plan contextComponentPlan, replacements []string) []string {
 	prefix := "target:" + plan.targetID + ":component:" + plan.kind + ":" + plan.row.ID + ":"
-	out := make([]string, 0, len(omissions)+len(replacements))
-	for _, omission := range omissions {
-		if !strings.HasPrefix(omission, prefix) {
-			out = append(out, omission)
-		}
+	start := sort.SearchStrings(omissions, prefix)
+	end := start
+	for end < len(omissions) && strings.HasPrefix(omissions[end], prefix) {
+		end++
 	}
-	out = append(out, replacements...)
-	sort.Strings(out)
-	return out
+	added := append([]string(nil), replacements...)
+	sort.Strings(added)
+	out := make([]string, 0, len(omissions)-(end-start)+len(added))
+	next := 0
+	for index, omission := range omissions {
+		if index >= start && index < end {
+			continue
+		}
+		for next < len(added) && added[next] < omission {
+			out = append(out, added[next])
+			next++
+		}
+		out = append(out, omission)
+	}
+	return append(out, added[next:]...)
 }
 
 func removeContextOmission(omissions []string, wanted string) []string {
